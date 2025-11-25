@@ -1,28 +1,46 @@
+// ==== utils.hpp (rewritten for dense CSV J,h loading) ====
+#ifndef UTILS_HPP
+#define UTILS_HPP
+
+
 #include <iostream>
 #include <fstream>
 #include <string>
 #include <sstream>
+#include <vector>
 #include <functional>
 #include <memory>
-
 #include <sys/time.h>
+
+
 using std::string;
 
-double rtclock();
 
+double rtclock();
 void printtime(const char *str, double starttime, double endtime);
+
 
 class ParseData
 {
 public:
-	ParseData(const string filename, std::vector<float>& adjMat);
-	void readDataDim(string data, std::vector<float>& adjMat);
-	void readData(string data, std::vector<float>& adjMat);
-	void readLinearValues(const string filename, std::vector<float>& linearVect);
+// Reads dense NxN J matrix
+ParseData(const string filename, std::vector<float>& adjMat);
 
-	std::vector<unsigned int> getDataDims() const;
+
+// Reads h vector
+void readLinearValues(const string filename, std::vector<float>& linearVect);
+
+
+std::vector<unsigned int> getDataDims() const;
+
+
 private:
-	std::unique_ptr<std::ifstream, std::function<void(std::ifstream*)> > _pifstream;
-	//std::vector<int> _matA;
-	std::vector<unsigned int> _data_dims;// rows and columns
+std::unique_ptr<std::ifstream, std::function<void(std::ifstream*)>> _pifstream;
+std::vector<unsigned int> _data_dims; // {N, N}
+
+
+void readDenseJ(std::vector<float>& adjMat);
 };
+
+
+#endif
