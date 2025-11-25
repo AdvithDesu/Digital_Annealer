@@ -64,7 +64,7 @@ __device__ __forceinline__ float mAtomicMax(float *address, float val)
 }
 
 #define gpuErrchk(ans) { gpuAssert((ans), __FILE__, __LINE__); }
-inline void gpuAssert(cudaError_t code, char *file, int line, bool abort = true)
+inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort = true)
 {
 	if (code != cudaSuccess)
 	{
@@ -192,8 +192,8 @@ int main(int argc, char* argv[])
   unsigned int num_temps = 1000; //atoi(argv[2]);
   unsigned int num_sweeps_per_beta = 1;//atoi(argv[3]);
 	
- 
-  bool write = false;
+  
+  // bool do_write = false;
   bool debug = false;
   
 
@@ -236,8 +236,9 @@ int main(int argc, char* argv[])
 			num_temps = atoi(optarg); break;
 		case 'm':
 			num_sweeps_per_beta = atoi(optarg); break;
-		case 'o':
-			write = true; break;
+        //does not seem to be used
+		//case 'o':
+			//do_write = true; break;
  		case 'd':
 			debug = true; break;
 		case 'h':
@@ -255,6 +256,8 @@ int main(int argc, char* argv[])
  	double starttime = rtclock();
 	ParseData parseData(filename, adjMat);
 
+    std::cout << "ParseData constructed successfully" << std::endl;
+
 	std::vector<float> linearTermsVect;
 	//if (linear_file.empty() == false)
 	parseData.readLinearValues(linear_file, linearTermsVect);
@@ -267,7 +270,9 @@ int main(int argc, char* argv[])
 	unsigned int adj_mat_size = adjMat.size();
 	auto graphs_data = parseData.getDataDims();//sqrt(adjMat.size());
 	unsigned int num_spins = graphs_data.at(0);
-	unsigned int CPU_THREADS = THREADS;//(num_spins < 32) ? num_spins : 32; 
+
+    // CPU_THREADS does not seem to be used
+	// unsigned int CPU_THREADS = THREADS;//(num_spins < 32) ? num_spins : 32; 
 
 //	cudaMemcpyToSymbol( &THREADS, &CPU_THREADS, sizeof(unsigned int));
 	// Setup cuRAND generator
@@ -345,7 +350,7 @@ int main(int argc, char* argv[])
 	gpuErrchk(cudaMalloc((void**)&gpu_spins, num_spins * sizeof(*gpu_spins)));
 
 	std::cout << "initialize spin values " << std::endl;
-	int blocks = (num_spins + THREADS - 1) / THREADS;
+	// int blocks = (num_spins + THREADS - 1) / THREADS;
 	curandGenerateUniform(rng, gpu_randvals, num_spins);
 	
   //d_debug_kernel<<< 1, 1>>>(gpuAdjMat, gpu_adj_mat_size, gpu_num_spins);
@@ -591,7 +596,7 @@ __global__ void changeInLocalEnePerSpin(float* gpuAdjMat, unsigned int* gpuAdjMa
   if (threadIdx.x == 0)
      acquire_semaphore(&sem);
   __syncthreads();
- 
+
 	// shared  spin_v0|spin_v1|.......|J_spin0| J_spin1| J_spin2|..
 	__shared__ float sh_mem_spins_Energy[THREADS];
     sh_mem_spins_Energy[p_Id] = 0;
@@ -885,8 +890,9 @@ __global__ void d_avg_magnetism(signed char* gpuSpins, const unsigned int* gpu_n
 	__shared__ float sh_mem_spins_Energy[THREADS];	
   sh_mem_spins_Energy[p_Id] = 0;	
   __syncthreads();	
-  	
- 	int num_iter = (gpu_num_spins[0] + THREADS - 1) / THREADS;
+
+    // num_iter does not seem to be used here
+ 	// int num_iter = (gpu_num_spins[0] + THREADS - 1) / THREADS;
    	 	
 	for (int i = 0; i < gpu_num_spins[0]; i++)	
 	{	
