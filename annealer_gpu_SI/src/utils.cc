@@ -1,134 +1,119 @@
-#include <vector>
-
-#include "annealer_gpu_SI/utils.hpp"
+// ==== utils.cc (rewritten) ====
+#include "utils.hpp"
 
 using std::vector;
 
-
+// -------------------- timing utils --------------------
 double rtclock() {
-  struct timezone Tzp;
-  struct timeval Tp;
-  int stat;
-  stat = gettimeofday(&Tp, &Tzp);
-  if (stat != 0) printf("Error return from gettimeofday: %d", stat);
-  return(Tp.tv_sec + Tp.tv_usec * 1.0e-6);
+    struct timezone Tzp;
+    struct timeval Tp;
+    gettimeofday(&Tp, &Tzp);
+    return (Tp.tv_sec + Tp.tv_usec * 1.0e-6);
 }
 
 void printtime(const char *str, double starttime, double endtime) {
-	printf("%s%3f seconds\n", str, endtime - starttime);
+    printf("%s%3f seconds\n", str, endtime - starttime);
 }
 
-ParseData::ParseData(const string filename, std::vector<float>& adjMat) :_pifstream(new std::ifstream(filename, std::ifstream::in), [](std::ifstream* fp) {fp->close(); })
+// -------------------- ParseData implementation --------------------
+ParseData::ParseData(const string filename, std::vector<float>& adjMat)
+    : _pifstream(new std::ifstream(filename), [](std::ifstream* fp){ fp->close(); })
 {
-	int j = 0;
-	string row_line;
-	if (_pifstream->is_open()) {
+    if (!_pifstream->is_open()) {
+        std::cerr << "ERROR: Could not open J matrix file: " << filename << std::endl;
+        exit(1);
+    }
 
-		while (std::getline(*_pifstream, row_line)) {
-			if (j == 0)
-				readDataDim(row_line, adjMat);
-			else
-			{
-				if (j <= _data_dims.at(1) && j != 0)
-					readData(row_line, adjMat);
-			}
-			//std::cout << "Each row "<< filename << " " << row_line << std::endl;
-			j++;
-		}
-		_pifstream->close();
-	}
-	else 
-	{
-		std::cerr << "File not opening " << std::endl;
-	}
+    readDenseJ(adjMat);
+    _pifstream->close();
 }
 
+void ParseData::readDenseJ(std::vector<float>& adjMat)
+{
+    vector<vector<float>> rows;
+    string line;
+
+    while (std::getline(*_pifstream, line)) {
+        if (line.size() == 0) continue;
+
+        std::stringstream ss(line);
+        string val;
+        vector<float> row;
+
+        while (std::getline(ss, val, ',')) {
+            if (val.size() == 0) continue;
+            row.push_back(std::stof(val));
+        }
+        if (!row.empty()) rows.push_back(row);
+    }
+
+    if (rows.empty()) {
+        std::cerr << "ERROR: J matrix file is empty" << std::endl;
+        exit(1);
+    }
+
+    unsigned int N = rows.size();
+
+    // Validate square matrix
+    for (unsigned int i = 0; i < N; i++) {
+        if (rows[i].size() != N) {
+            std::cerr << "ERROR: J matrix must be square. Row " << i
+                      << " has size " << rows[i].size() << " but expected " << N << std::endl;
+            exit(1);
+        }
+    }
+
+    _data_dims = {N, N};
+
+    adjMat.resize(N * N);
+
+    // Store in row-major, and zero diagonal
+    for (unsigned int i = 0; i < N; i++) {
+        for (unsigned int j = 0; j < N; j++) {
+            float v = rows[i][j];
+            if (i == j) v = 0.0f; // enforce old behavior
+            adjMat[i * N + j] = v;
+        }
+    }
+}
+
+// -------------------- Load h vector --------------------
 void ParseData::readLinearValues(const string filename, std::vector<float>& linearVect)
 {
+    if (filename.empty()) {
+        unsigned int N = _data_dims[0];
+        linearVect.assign(N, 0.0f);
+        return;
+    }
 
-	std::unique_ptr<std::ifstream, std::function<void(std::ifstream*)> > pLVifstream(
-								new std::ifstream(filename, std::ifstream::in), 
-								[](std::ifstream* fp) {fp->close(); });
-	if (filename.empty() == false) {
-		string row_line;
-		if (pLVifstream->is_open()) {
-			while (std::getline(*pLVifstream, row_line)) {
-				std::istringstream input;
-				input.str(row_line);
+    std::ifstream file(filename);
+    if (!file.is_open()) {
+        std::cerr << "WARNING: Could not open h file. Using zeros." << std::endl;
+        unsigned int N = _data_dims[0];
+        linearVect.assign(N, 0.0f);
+        return;
+    }
 
-				for (std::string line; std::getline(input, line, ' '); ) {
-					linearVect.push_back(std::stof(line));
-				}
+    vector<float> vals;
+    string line;
 
-			}
-			pLVifstream->close();
-		}
-		else
-		{
-			std::cerr << " [ERROR] Linear File not opening " << std::endl;
-		}
-	}
-	else
-	{
-		linearVect.resize(_data_dims[0], 0.f);
-	}
-// print the value of the vector
-}
+    while (std::getline(file, line)) {
+        if (line.size() == 0) continue;
+        std::stringstream ss(line);
+        string val;
+        while (std::getline(ss, val, ',')) {
+            if (val.size() == 0) continue;
+            vals.push_back(std::stof(val));
+        }
+    }
 
-void ParseData::readDataDim(string data, std::vector<float>& adjMat)
-{
-	std::istringstream input;
-	input.str(data);
+    unsigned int N = _data_dims[0];
+    if (vals.size() < N) vals.resize(N, 0.0f);
+    if (vals.size() > N) vals.resize(N);
 
-	for (std::string line; std::getline(input, line, ' '); ) {
- //std::cout << line << " *****  Dimensions Verrtices and Edges **** " << std::endl;
-		_data_dims.push_back(std::stoi(line));
-	    //* std::cout << std::stoi(line) << "*****  Dimensions Verrtices and Edges **** " << std::endl;
-		//std::this_thread::sleep_for(std::chrono::seconds(1));
-		
-	}
-	
-	adjMat.resize(_data_dims[0] * _data_dims[0]);
-
-}
-void ParseData::readData(string data, std::vector<float>& adjMat)
-{
-	
-	std::istringstream input;
-	input.str(data);
-	std::vector<std::string> line_data;//@R std::vector<float> line_data;
-	for (std::string line; std::getline(input, line, ' '); ) {
-     //std::cout << line << std::endl;
-		line_data.push_back(line);
-	}
-	if (line_data.size() == 3)
-	{
-		  //std::cout << line_data.size() << std::endl;
-	    //std::cout << line_data.at(0) <<  " " << line_data.at(1) << " " << line_data.at(2) << std::endl;
-		  //std::this_thread::sleep_for(std::chrono::seconds(1));
-		  int first_entry= std::stoi(line_data.at(0));
-		  int sec_entry = std::stoi(line_data.at(1));
-        
-      // H = Jij si sj
-      // del H should be this  (Jii si_new si_new + ...) - (Jii si_old si_old + ...)   instead  (Jii si_old si_new + ...) - (Jii si_old si_old + ...)[Wrong]
-      // del H = (Jii 1 + .............)  - (Jii 1 + .............)
-      // As the global memory contains the old value of si (i.e. si_old instead of si_new)
-      // either add if in the kernel [Bad approach thread divergence] 
-      // So just make Jii = 0.f		
-      
-      if(first_entry == sec_entry)
-      {
-          adjMat[(_data_dims.at(0) * (first_entry - 1)) + (sec_entry - 1)] = 0.0f;
-      }
-      else
-      {
-        adjMat[(_data_dims.at(0) * (first_entry - 1)) + (sec_entry - 1)] = stof(line_data.at(2) );
-        adjMat[(_data_dims.at(0) * (sec_entry - 1)) + (first_entry - 1)] = stof(line_data.at(2));   
-		    //std::cout << adjMat[_data_dims.at(0)*(line_data.at(0) - 1) + (line_data.at(1) - 1)] << std::endl;
-     }
-	}
+    linearVect = vals;
 }
 
 std::vector<unsigned int> ParseData::getDataDims() const {
-	return _data_dims;
-}// Parse class ends
+    return _data_dims;
+}
