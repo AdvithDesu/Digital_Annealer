@@ -640,8 +640,8 @@ __global__ void changeInLocalEnePerSpin(float* gpuAdjMat, unsigned int* gpuAdjMa
 	if (p_Id == 0)
 	{
       // Original delta energy expression
-      float local_ham_per_spin =  - 2.f * ( (-1.f * sh_mem_spins_Energy[0]) - gpuLinTermsVect[vertice_Id] ) * current_spin_shared_mem;
-      // float local_ham_per_spin =  - 2.f * ( (sh_mem_spins_Energy[0]) - gpuLinTermsVect[vertice_Id] ) * current_spin_shared_mem; //  final energy - current energy
+      // float local_ham_per_spin =  - 2.f * ( (-1.f * sh_mem_spins_Energy[0]) - gpuLinTermsVect[vertice_Id] ) * current_spin_shared_mem;
+      // float local_ham_per_spin =  - 2.f * ( (sh_mem_spins_Energy[0]) + gpuLinTermsVect[vertice_Id] ) * current_spin_shared_mem; //  final energy - current energy
 	
 	  float prob_ratio = exp(-1.f * beta * (local_ham_per_spin)); // exp(- (E_f - E_i) / T)
         
@@ -752,7 +752,9 @@ __global__ void final_spins_total_energy(float* gpuAdjMat, unsigned int* gpuAdjM
 		// p_Id (worker group)
 		if (p_Id + i * THREADS < num_spins)
 		{
-			sh_mem_spins_Energy[p_Id] += (-0.5f) * gpuAdjMat[p_Id + (i * THREADS) + (vertice_Id * stride_jump_each_vertice)] * ((float)gpuSpins[p_Id + i * THREADS]);
+			// Original expression
+			// sh_mem_spins_Energy[p_Id] += (-0.5f) * gpuAdjMat[p_Id + (i * THREADS) + (vertice_Id * stride_jump_each_vertice)] * ((float)gpuSpins[p_Id + i * THREADS]);
+			sh_mem_spins_Energy[p_Id] += gpuAdjMat[p_Id + (i * THREADS) + (vertice_Id * stride_jump_each_vertice)] * ((float)gpuSpins[p_Id + i * THREADS]);
 		}
 	}
 	__syncthreads();
@@ -823,8 +825,9 @@ __global__ void preprocess_max_cut_from_ising(float* gpuAdjMat, unsigned int* gp
 	{
 
 		float vertice_energy;
-
-		vertice_energy = (0.5f) * sh_mem_spins_Energy[0];
+		// Origial vertice_energy
+		// vertice_energy = (0.5f) * sh_mem_spins_Energy[0];
+		vertice_energy = sh_mem_spins_Energy[0];
 
 		atomicAdd(max_cut_value, vertice_energy);
 
