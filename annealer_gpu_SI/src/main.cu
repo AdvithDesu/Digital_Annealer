@@ -639,8 +639,9 @@ __global__ void changeInLocalEnePerSpin(float* gpuAdjMat, unsigned int* gpuAdjMa
 	
 	if (p_Id == 0)
 	{
-    
-      float local_ham_per_spin =  - 2.f * ( (-1.f * sh_mem_spins_Energy[0]) - gpuLinTermsVect[vertice_Id] ) * current_spin_shared_mem; //  final energy - current energy
+      // Original delta energy expression
+      // float local_ham_per_spin =  - 2.f * ( (-1.f * sh_mem_spins_Energy[0]) - gpuLinTermsVect[vertice_Id] ) * current_spin_shared_mem;
+      float local_ham_per_spin =  - 2.f * ( (sh_mem_spins_Energy[0]) - gpuLinTermsVect[vertice_Id] ) * current_spin_shared_mem; //  final energy - current energy
 	
 	  float prob_ratio = exp(-1.f * beta * (local_ham_per_spin)); // exp(- (E_f - E_i) / T)
         
@@ -766,7 +767,8 @@ __global__ void final_spins_total_energy(float* gpuAdjMat, unsigned int* gpuAdjM
 
 	if (p_Id == 0)
 	{
-
+        // Original vertice energy (without 0.5)
+		// float vertice_energy = ((float)gpuSpins[vertice_Id]) * ( sh_mem_spins_Energy[0] - gpuLinTermsVect[vertice_Id] );
 		float vertice_energy = ((float)gpuSpins[vertice_Id]) * ( sh_mem_spins_Energy[0] - gpuLinTermsVect[vertice_Id] );
 		// hamiltonian_per_spin[vertice_Id] = vertice_energy;// each threadblock updates its own memory location
 
@@ -806,6 +808,7 @@ __global__ void preprocess_max_cut_from_ising(float* gpuAdjMat, unsigned int* gp
 			sh_mem_spins_Energy[p_Id] += gpuAdjMat[p_Id + (i * THREADS) + (vertice_Id * stride_jump_each_vertice)] * (1.f - (current_spin_row * (float)gpuSpins[p_Id + i * THREADS]));
 		}
 	}
+
 	__syncthreads();
 
   for (int off = blockDim.x/2; off; off /= 2) {
