@@ -21,8 +21,8 @@
 
 #include "annealer_gpu_SI/utils.hpp"
 
-#define PERCENTAGE_CHANGE_MAX_ENERGY 0.01f
-#define BREAK_AFTER_ITERATION 0.05f
+#define PERCENTAGE_CHANGE_MAX_ENERGY 0.0f
+#define BREAK_AFTER_ITERATION 1.0f
 //__constant__ float kd_floats[1000000];
 void printVecOfVec(std::vector<float> adjMat)
 {
