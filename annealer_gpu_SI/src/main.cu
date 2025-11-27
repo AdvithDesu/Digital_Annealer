@@ -700,7 +700,9 @@ __global__ void init_spins_total_energy(float* gpuAdjMat, unsigned int* gpuAdjMa
 		// p_Id (worker group)
 		if (p_Id + i * THREADS < num_spins)
 		{
-			sh_mem_spins_Energy[p_Id] += (- 0.5f ) * gpuAdjMat[p_Id + (i * THREADS) + (vertice_Id * stride_jump_each_vertice)] * ((float)gpuSpins[p_Id + i * THREADS]); 
+			// Original expression
+			// sh_mem_spins_Energy[p_Id] += (- 0.5f ) * gpuAdjMat[p_Id + (i * THREADS) + (vertice_Id * stride_jump_each_vertice)] * ((float)gpuSpins[p_Id + i * THREADS]);
+			sh_mem_spins_Energy[p_Id] += gpuAdjMat[p_Id + (i * THREADS) + (vertice_Id * stride_jump_each_vertice)] * ((float)gpuSpins[p_Id + i * THREADS]);
 		}
 	}
 	__syncthreads();
