@@ -110,6 +110,121 @@ __global__ void final_spins_total_energy(float* gpuAdjMat, unsigned int* gpuAdjM
        float* total_energy);
 
 // Removed changeInLocalEnePerSpin Initialization
+
+//===================================================================
+// Kernel for selecting K spin flips using Fisher-Yates shuffle
+//===================================================================
+
+__global__ void selectExactK(
+    int *accepted, int num_accepted,
+    int *selected, int k)
+{
+    if (threadIdx.x != 0) return;
+
+    curandState st;
+    curand_init(1234ULL, 0, 0, &st);
+
+    // shuffle
+    for (int i = num_accepted - 1; i > 0; i--) {
+        int j = curand(&st) % (i + 1);
+        int tmp = accepted[i];
+        accepted[i] = accepted[j];
+        accepted[j] = tmp;
+    }
+
+    // copy first k
+    for (int i = 0; i < k; i++) {
+        selected[i] = accepted[i];
+    }
+}
+
+//============================================================
+// Kernel for applying K flips
+//============================================================
+
+__global__ void applyExactKFlips(
+    signed char *spins,
+    int *selected,
+    int k)
+{
+    int idx = blockIdx.x;
+    if (idx < k) {
+        int i = selected[idx];
+        spins[i] = -spins[i];
+    }
+}
+
+// =====================================================================
+// NEW KERNEL 1 FOR EXACT-K METHOD
+// Compute ΔE + Metropolis acceptance but DO NOT flip spins.
+// Instead, store all spins that pass Metropolis into d_accepted[].
+// =====================================================================
+
+__global__ void gpu_compute_candidates(
+    float* gpuAdjMat, 
+    unsigned int* gpuAdjMatSize,
+    float* gpuLinTermsVect,
+    signed char* gpuLatSpin,
+    const unsigned int* gpu_num_spins,
+    const float beta,
+    int *d_accepted,
+    int *d_num_accepted,
+    curandState* globalState)
+{
+    unsigned int vertice_Id = blockIdx.x;
+    unsigned int p_Id       = threadIdx.x;
+
+    __shared__ float sh_mem_spins_Energy[THREADS];
+    sh_mem_spins_Energy[p_Id] = 0.f;
+    __syncthreads();
+
+    float current_spin = (float)gpuLatSpin[vertice_Id];
+
+    unsigned int stride_jump_each_vertice = sqrtf((float)gpuAdjMatSize[0]);
+    unsigned int num_spins = gpu_num_spins[0];
+    int num_iter = (num_spins + THREADS - 1) / THREADS;
+
+    // compute Σ J_ij * s_j in parallel
+    for (int i = 0; i < num_iter; i++)
+    {
+        int j = p_Id + i * THREADS;
+        if (j < num_spins)
+        {
+            float Sj = (float)gpuLatSpin[j];
+            sh_mem_spins_Energy[p_Id] += gpuAdjMat[j + vertice_Id * stride_jump_each_vertice] * Sj;
+        }
+    }
+    __syncthreads();
+
+    // parallel reduction
+    for (int off = blockDim.x / 2; off; off >>= 1)
+    {
+        if (p_Id < off)
+            sh_mem_spins_Energy[p_Id] += sh_mem_spins_Energy[p_Id + off];
+        __syncthreads();
+    }
+
+    // single thread computes ΔE and Metropolis acceptance
+    if (p_Id == 0)
+    {
+        float local_ham = -2.f * current_spin * (sh_mem_spins_Energy[0] + gpuLinTermsVect[vertice_Id]);
+
+        float prob_ratio = expf(-beta * local_ham);
+        float acceptance_prob = fminf(1.f, prob_ratio);
+
+        float r = curand_uniform(&globalState[vertice_Id]);
+
+        // Instead of flipping — record which spin WOULD be flipped
+        if (r < acceptance_prob)
+        {
+            int pos = atomicAdd(d_num_accepted, 1);
+            d_accepted[pos] = vertice_Id;
+        }
+    }
+}
+
+//======================================================================================
+//======================================================================================
   
 __global__ void d_avg_magnetism(signed char* gpuSpins, const unsigned int* gpu_num_spins, float* avg_magnetism);
 
@@ -620,127 +735,12 @@ if(debug)
 	return 0;
 }
 
-//===================================================================
-// Kernel for selecting K spin flips using Fisher-Yates shuffle
-//===================================================================
-
-__global__ void selectExactK(
-    int *accepted, int num_accepted,
-    int *selected, int k)
-{
-    if (threadIdx.x != 0) return;
-
-    curandState st;
-    curand_init(1234ULL, 0, 0, &st);
-
-    // shuffle
-    for (int i = num_accepted - 1; i > 0; i--) {
-        int j = curand(&st) % (i + 1);
-        int tmp = accepted[i];
-        accepted[i] = accepted[j];
-        accepted[j] = tmp;
-    }
-
-    // copy first k
-    for (int i = 0; i < k; i++) {
-        selected[i] = accepted[i];
-    }
-}
-
-//============================================================
-// Kernel for applying K flips
-//============================================================
-
-__global__ void applyExactKFlips(
-    signed char *spins,
-    int *selected,
-    int k)
-{
-    int idx = blockIdx.x;
-    if (idx < k) {
-        int i = selected[idx];
-        spins[i] = -spins[i];
-    }
-}
-
 
 #define CORRECT 1
 
 #if CORRECT
 
 #endif
-
-// =====================================================================
-// NEW KERNEL 1 FOR EXACT-K METHOD
-// Compute ΔE + Metropolis acceptance but DO NOT flip spins.
-// Instead, store all spins that pass Metropolis into d_accepted[].
-// =====================================================================
-
-__global__ void gpu_compute_candidates(
-    float* gpuAdjMat, 
-    unsigned int* gpuAdjMatSize,
-    float* gpuLinTermsVect,
-    signed char* gpuLatSpin,
-    const unsigned int* gpu_num_spins,
-    const float beta,
-    int *d_accepted,
-    int *d_num_accepted,
-    curandState* globalState)
-{
-    unsigned int vertice_Id = blockIdx.x;
-    unsigned int p_Id       = threadIdx.x;
-
-    __shared__ float sh_mem_spins_Energy[THREADS];
-    sh_mem_spins_Energy[p_Id] = 0.f;
-    __syncthreads();
-
-    float current_spin = (float)gpuLatSpin[vertice_Id];
-
-    unsigned int stride_jump_each_vertice = sqrtf((float)gpuAdjMatSize[0]);
-    unsigned int num_spins = gpu_num_spins[0];
-    int num_iter = (num_spins + THREADS - 1) / THREADS;
-
-    // compute Σ J_ij * s_j in parallel
-    for (int i = 0; i < num_iter; i++)
-    {
-        int j = p_Id + i * THREADS;
-        if (j < num_spins)
-        {
-            float Sj = (float)gpuLatSpin[j];
-            sh_mem_spins_Energy[p_Id] += gpuAdjMat[j + vertice_Id * stride_jump_each_vertice] * Sj;
-        }
-    }
-    __syncthreads();
-
-    // parallel reduction
-    for (int off = blockDim.x / 2; off; off >>= 1)
-    {
-        if (p_Id < off)
-            sh_mem_spins_Energy[p_Id] += sh_mem_spins_Energy[p_Id + off];
-        __syncthreads();
-    }
-
-    // single thread computes ΔE and Metropolis acceptance
-    if (p_Id == 0)
-    {
-        float local_ham = -2.f * current_spin * (sh_mem_spins_Energy[0] + gpuLinTermsVect[vertice_Id]);
-
-        float prob_ratio = expf(-beta * local_ham);
-        float acceptance_prob = fminf(1.f, prob_ratio);
-
-        float r = curand_uniform(&globalState[vertice_Id]);
-
-        // Instead of flipping — record which spin WOULD be flipped
-        if (r < acceptance_prob)
-        {
-            int pos = atomicAdd(d_num_accepted, 1);
-            d_accepted[pos] = vertice_Id;
-        }
-    }
-}
-
-//======================================================================================
-//======================================================================================
 
 // Initialize lattice spins
 __global__ void init_spins_total_energy(float* gpuAdjMat, unsigned int* gpuAdjMatSize,
