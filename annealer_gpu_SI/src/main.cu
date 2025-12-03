@@ -109,14 +109,7 @@ __global__ void final_spins_total_energy(float* gpuAdjMat, unsigned int* gpuAdjM
        const unsigned int* gpu_num_spins,
        float* total_energy);
 
-__global__ void changeInLocalEnePerSpin(float* gpuAdjMat, unsigned int* gpuAdjMatSize,
-	float* gpuLinTermsVect,
-	const float* __restrict__ randvals,
-	signed char* gpuLatSpin,
-	const unsigned int* gpu_num_spins,
-	const float beta,
-	float* total_energy,
-	curandState* globalState);
+// Removed changeInLocalEnePerSpin Initialization
   
 __global__ void d_avg_magnetism(signed char* gpuSpins, const unsigned int* gpu_num_spins, float* avg_magnetism);
 
@@ -676,88 +669,6 @@ __global__ void applyExactKFlips(
 #define CORRECT 1
 
 #if CORRECT
-
-__global__ void changeInLocalEnePerSpin(float* gpuAdjMat, unsigned int* gpuAdjMatSize,
-	float* gpuLinTermsVect,
-	const float* __restrict__ randvals,
-	signed char* gpuLatSpin,
-	const unsigned int* gpu_num_spins,
-	const float beta,
-	float* total_energy,
-	curandState* globalState) {
-
-	unsigned int vertice_Id = blockIdx.x;
-	unsigned int p_Id = threadIdx.x;    //32 worker threads 
-	// for each neighour of vertex id pull the gpucurrentupdate[i] and place it in the shared memory
-
-  __syncthreads();
-  if (threadIdx.x == 0)
-     acquire_semaphore(&sem);
-  __syncthreads();
-
-	// shared  spin_v0|spin_v1|.......|J_spin0| J_spin1| J_spin2|..
-	__shared__ float sh_mem_spins_Energy[THREADS];
-    sh_mem_spins_Energy[p_Id] = 0;
-    __syncthreads();
-
-	float current_spin_shared_mem;
-
-
-	current_spin_shared_mem = (float)gpuLatSpin[vertice_Id];
-
-
-	unsigned int stride_jump_each_vertice = sqrt((float)gpuAdjMatSize[0]);
-	unsigned int num_spins = gpu_num_spins[0];
-	int num_iter = int((num_spins) / THREADS) + 1;// @R (num_spins + THREADS - 1) / THREADS;
-
-	// placing all the spins data into the shared memory..
-	// hence, decouple the spins to the global spins
-	for (int i = 0; i < num_iter; i++)
-	{
-		if (p_Id + i * THREADS < num_spins)
-		{
-			float current_spin;
-			current_spin = (float)gpuLatSpin[p_Id + i * THREADS];
-        
-			sh_mem_spins_Energy[p_Id] += gpuAdjMat[p_Id + (i * THREADS) + (vertice_Id * stride_jump_each_vertice)] * (current_spin);
- 		       
-		}
-	}
-	__syncthreads();
-
-
-  for (int off = blockDim.x/2; off; off /= 2) {
-     if (threadIdx.x < off) {
-         sh_mem_spins_Energy[threadIdx.x] += sh_mem_spins_Energy[threadIdx.x + off];
-       }
-   __syncthreads();
-   }
-   
-  __syncthreads();
-	
-	if (p_Id == 0)
-	{
-      // Original delta energy expression
-      // float local_ham_per_spin =  - 2.f * ( (-1.f * sh_mem_spins_Energy[0]) - gpuLinTermsVect[vertice_Id] ) * current_spin_shared_mem;
-      float local_ham_per_spin =  - 2.f * ( (sh_mem_spins_Energy[0]) + gpuLinTermsVect[vertice_Id] ) * current_spin_shared_mem; //  final energy - current energy
-	
-	  float prob_ratio = exp(-1.f * beta * (local_ham_per_spin)); // exp(- (E_f - E_i) / T)
-        
-	  float acceptance_probability = min((float)1.f, prob_ratio);
-
-	  if (randvals[vertice_Id] < acceptance_probability)
-      {
-            gpuLatSpin[vertice_Id] = (signed char)(-1.f * current_spin_shared_mem); 
-      }
-	}
- 
- __threadfence(); 
- __syncthreads();
- if (threadIdx.x == 0)
-   release_semaphore(&sem);
- __syncthreads();
-
-}
 
 #endif
 
