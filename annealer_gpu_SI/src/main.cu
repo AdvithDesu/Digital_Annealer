@@ -583,8 +583,35 @@ if(debug)
 	return 0;
 }
 
+\\===================================================================
+\\ Kernel for selecting K spin flips using Fisher-Yates shuffle
+\\===================================================================
 
+__global__ void selectExactK(
+    int *accepted, int num_accepted,
+    int *selected, int k)
+{
+    if (threadIdx.x != 0) return;
 
+    curandState st;
+    curand_init(1234ULL, 0, 0, &st);
+
+    // shuffle
+    for (int i = num_accepted - 1; i > 0; i--) {
+        int j = curand(&st) % (i + 1);
+        int tmp = accepted[i];
+        accepted[i] = accepted[j];
+        accepted[j] = tmp;
+    }
+
+    // copy first k
+    for (int i = 0; i < k; i++) {
+        selected[i] = accepted[i];
+    }
+}
+
+\============================================================
+\============================================================
 
 #define CORRECT 1
 
