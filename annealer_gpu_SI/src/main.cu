@@ -115,28 +115,35 @@ __global__ void final_spins_total_energy(float* gpuAdjMat, unsigned int* gpuAdjM
 // Kernel for selecting K spin flips using Fisher-Yates shuffle
 //===================================================================
 
-__global__ void selectExactK(
-    int *accepted, int num_accepted,
-    int *selected, int k)
+__global__ void gpu_select_exact_k(
+    int *d_accepted, 
+    int num_accepted,
+    int *d_selected, 
+    int k)
 {
     if (threadIdx.x != 0) return;
 
-    curandState st;
-    curand_init(1234ULL, 0, 0, &st);
+    // local RNG for shuffling (one thread only)
+    curandState local_state;
+    curand_init(1234ULL, 0, 0, &local_state);
 
-    // shuffle
-    for (int i = num_accepted - 1; i > 0; i--) {
-        int j = curand(&st) % (i + 1);
-        int tmp = accepted[i];
-        accepted[i] = accepted[j];
-        accepted[j] = tmp;
+    // Fisher–Yates shuffle of d_accepted[]
+    for (int i = num_accepted - 1; i > 0; i--)
+    {
+        int j = curand(&local_state) % (i + 1);
+
+        int tmp        = d_accepted[i];
+        d_accepted[i]  = d_accepted[j];
+        d_accepted[j]  = tmp;
     }
 
-    // copy first k
-    for (int i = 0; i < k; i++) {
-        selected[i] = accepted[i];
+    // Copy first k chosen spins into d_selected[]
+    for (int i = 0; i < k; i++)
+    {
+        d_selected[i] = d_accepted[i];
     }
 }
+
 
 //============================================================
 // Kernel for applying K flips
