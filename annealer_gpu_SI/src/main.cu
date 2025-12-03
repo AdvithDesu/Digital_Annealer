@@ -365,6 +365,17 @@ int main(int argc, char* argv[])
  	
    starttime = rtclock();
 
+	//-----------------------------------------------------------
+	// Allocating buffers for exact-k flip system
+	//-----------------------------------------------------------
+	
+	int *d_accepted, *d_selected;
+	int *d_num_accepted;
+	
+	gpuErrchk(cudaMalloc(&d_accepted, num_spins * sizeof(int)));
+	gpuErrchk(cudaMalloc(&d_selected, num_spins * sizeof(int)));
+	gpuErrchk(cudaMalloc(&d_num_accepted, sizeof(int)));
+
 	init_spins_total_energy << < num_spins, THREADS >> > (gpuAdjMat, gpu_adj_mat_size,
 		gpuLinTermsVect,
 		gpu_randvals,
