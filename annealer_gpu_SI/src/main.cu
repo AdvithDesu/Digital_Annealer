@@ -436,14 +436,58 @@ int main(int argc, char* argv[])
    {         
         cudaEventRecord(start); 
    }
-      	changeInLocalEnePerSpin << < num_spins, THREADS >> > (gpuAdjMat, gpu_adj_mat_size,
-				gpuLinTermsVect,
-      			gpu_randvals,
-      			gpu_spins,
-      			gpu_num_spins,
-      			beta_schedule.at(i),
-      			gpu_total_energy,
-      			devRanStates);
+
+		//-----------------------------------------------------------
+		// NEW exact-k sweep logic
+		//-----------------------------------------------------------
+		
+		// 0. Reset number of accepted spins
+		gpuErrchk(cudaMemset(d_num_accepted, 0, sizeof(int)));
+		
+		// 1. Compute ΔE + Metropolis, collect accepted spins
+		gpu_compute_candidates<<<num_spins, THREADS>>>(
+		    gpuAdjMat,
+		    gpu_adj_mat_size,
+		    gpuLinTermsVect,
+		    gpu_spins,
+		    gpu_num_spins,
+		    beta_schedule.at(i),
+		    d_accepted,
+		    d_num_accepted,
+		    devRanStates
+		);
+		gpuErrchk(cudaPeekAtLastError());
+		cudaDeviceSynchronize();
+		
+		// 2. Copy num_accepted to CPU
+		int h_num_acc = 0;
+		gpuErrchk(cudaMemcpy(&h_num_acc, d_num_accepted, sizeof(int), cudaMemcpyDeviceToHost));
+		
+		// 3. Compute exact-k
+		float flip_fraction = 0.50f;   // <-- your percentage
+		int k = ceil(flip_fraction * h_num_acc);
+		
+		if (k > 0)
+		{
+		    // 4. Randomly select exactly k from accepted
+		    gpu_select_exact_k<<<1,1>>>(
+		        d_accepted,
+		        h_num_acc,
+		        d_selected,
+		        k
+		    );
+		    gpuErrchk(cudaPeekAtLastError());
+		    cudaDeviceSynchronize();
+		
+		    // 5. Apply EXACTLY k flips
+		    applyExactKFlips<<<k,1>>>(
+		        gpu_spins,
+		        d_selected,
+		        k
+		    );
+		    gpuErrchk(cudaPeekAtLastError());
+		    cudaDeviceSynchronize();
+		}
                         
     if(debug)
     {
