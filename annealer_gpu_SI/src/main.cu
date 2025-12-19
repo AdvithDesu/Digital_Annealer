@@ -219,7 +219,14 @@ __global__ void gpu_compute_candidates(
         float prob_ratio = expf(-beta * local_ham);
         float acceptance_prob = fminf(1.f, prob_ratio);
 
-        float r = curand_uniform(&globalState[vertice_Id]);
+		// OLD RNG
+        // float r = curand_uniform(&globalState[vertice_Id]);
+
+		// Generate random number
+	    float r = curand_uniform(&localState);
+	
+	    // Write RNG state back
+	    globalState[vertice_Id] = localState;
 
         // Instead of flipping — record which spin WOULD be flipped
         if (r < acceptance_prob)
