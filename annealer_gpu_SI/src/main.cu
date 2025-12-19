@@ -151,13 +151,20 @@ __global__ void gpu_select_exact_k(
 
 __global__ void applyExactKFlips(
     signed char *spins,
-    int *selected,
+    int *d_selected,
+    int *d_accepted,
+    float *d_deltaE,
+    float *total_energy,
     int k)
 {
     int idx = blockIdx.x;
     if (idx < k) {
-        int i = selected[idx];
-        spins[i] = -spins[i];
+        int acc_idx = d_selected[idx];
+
+		int spin_id = d_accepted[acc_idx];
+		spins[spin_id] = -spins[spin_id];
+
+		atomicAdd(total_energy, d_deltaE[acc_idx]);
     }
 }
 
@@ -582,6 +589,7 @@ int main(int argc, char* argv[])
 		    gpu_num_spins,
 		    beta_schedule.at(i),
 		    d_accepted,
+    		d_deltaE,
 		    d_num_accepted,
 		    devRanStates
 		);
@@ -610,8 +618,11 @@ int main(int argc, char* argv[])
 		
 		    // 5. Apply EXACTLY k flips
 		    applyExactKFlips<<<k,1>>>(
-		        gpu_spins,
-		        d_selected,
+			    gpu_spins,
+			    d_selected,
+			    d_accepted,
+			    d_deltaE,
+			    gpu_total_energy,
 		        k
 		    );
 		    gpuErrchk(cudaPeekAtLastError());
