@@ -118,7 +118,7 @@ __global__ void final_spins_total_energy(float* gpuAdjMat, unsigned int* gpuAdjM
 __global__ void gpu_select_exact_k(
     int *d_accepted, 
     int num_accepted,
-    int *d_selected, 
+    int *d_selected,
     int k)
 {
     if (threadIdx.x != 0) return;
@@ -175,6 +175,7 @@ __global__ void gpu_compute_candidates(
     const unsigned int* gpu_num_spins,
     const float beta,
     int *d_accepted,
+    float *d_deltaE,
     int *d_num_accepted,
     curandState* globalState)
 {
@@ -233,6 +234,7 @@ __global__ void gpu_compute_candidates(
         {
             int pos = atomicAdd(d_num_accepted, 1);
             d_accepted[pos] = vertice_Id;
+			d_deltaE[pos]   = local_ham;   // ← STORE DeltaE
         }
     }
 }
@@ -493,6 +495,11 @@ int main(int argc, char* argv[])
 	
 	int *d_accepted, *d_selected;
 	int *d_num_accepted;
+
+	// tracking delta E's of all accepted spins
+	float *d_deltaE;
+
+	gpuErrchk(cudaMalloc(&d_deltaE, num_spins * sizeof(float)));
 	
 	gpuErrchk(cudaMalloc(&d_accepted, num_spins * sizeof(int)));
 	gpuErrchk(cudaMalloc(&d_selected, num_spins * sizeof(int)));
