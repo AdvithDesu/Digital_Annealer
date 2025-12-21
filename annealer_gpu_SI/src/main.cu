@@ -221,29 +221,29 @@ __global__ void gpu_compute_candidates(
 
     // single thread computes ΔE and Metropolis acceptance
     if (p_Id == 0)
-    {
-        float local_ham = -2.f * current_spin * (sh_mem_spins_Energy[0] + gpuLinTermsVect[vertice_Id]);
-
-        float prob_ratio = expf(-beta * local_ham);
-        float acceptance_prob = fminf(1.f, prob_ratio);
-
-		// OLD RNG
-        // float r = curand_uniform(&globalState[vertice_Id]);
-
-		// Generate random number
+	{
+	    // LOAD RNG STATE
+	    curandState localState = globalState[vertice_Id];
+	
+	    float local_ham = -2.f * current_spin *
+	        (sh_mem_spins_Energy[0] + gpuLinTermsVect[vertice_Id]);
+	
+	    float prob_ratio = expf(-beta * local_ham);
+	    float acceptance_prob = fminf(1.f, prob_ratio);
+	
 	    float r = curand_uniform(&localState);
 	
-	    // Write RNG state back
+	    // STORE RNG STATE BACK
 	    globalState[vertice_Id] = localState;
+	
+	    if (r < acceptance_prob)
+	    {
+	        int pos = atomicAdd(d_num_accepted, 1);
+	        d_accepted[pos] = vertice_Id;
+	        // d_deltaE[pos] = local_ham;   // if you use it
+	    }
+	}
 
-        // Instead of flipping — record which spin WOULD be flipped
-        if (r < acceptance_prob)
-        {
-            int pos = atomicAdd(d_num_accepted, 1);
-            d_accepted[pos] = vertice_Id;
-			d_deltaE[pos]   = local_ham;   // ← STORE DeltaE
-        }
-    }
 }
 
 //======================================================================================
