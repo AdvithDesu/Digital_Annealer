@@ -240,7 +240,7 @@ __global__ void gpu_compute_candidates(
 	    {
 	        int pos = atomicAdd(d_num_accepted, 1);
 	        d_accepted[pos] = vertice_Id;
-	        // d_deltaE[pos] = local_ham;   // if you use it
+	        d_deltaE[pos] = local_ham;
 	    }
 	}
 
