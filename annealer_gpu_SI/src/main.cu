@@ -784,71 +784,71 @@ __global__ void init_spins_total_energy(float* gpuAdjMat, unsigned int* gpuAdjMa
 	curandState * state,
 	unsigned long seed) {
 
-	unsigned int vertice_Id = blockIdx.x; // actual spin id in this threadBlock
-	unsigned int p_Id = threadIdx.x;// which worker id
+	unsigned int vertice_Id = blockIdx.x;
+	unsigned int p_Id = threadIdx.x;
 
 	if (p_Id == 0)
 	{
 		float randval = randvals[vertice_Id];
 		signed char val = (randval < 0.5f) ? -1 : 1;
-		gpuSpins[vertice_Id] = val;// random spin init.
+		gpuSpins[vertice_Id] = val;
 		curand_init(seed, blockIdx.x, 0, &state[blockIdx.x]);
 	}
 	__syncthreads();
 
 	__shared__ float sh_mem_spins_Energy[THREADS];
-    sh_mem_spins_Energy[p_Id] = 0;
-    __syncthreads();
+	sh_mem_spins_Energy[p_Id] = 0;
+	__syncthreads();
   
 	unsigned int stride_jump_each_vertice = sqrt((float)gpuAdjMatSize[0]);
 	unsigned int num_spins = gpu_num_spins[0];
 	int num_iter = (num_spins + THREADS - 1) / THREADS;
 
-	// num_iter data chucks 
+	float current_spin = (float)gpuSpins[vertice_Id];
+
+	// Compute sum_j J_ij * s_j (full sum, no 0.5 factor here)
 	for (int i = 0; i < num_iter; i++)
 	{
-		// p_Id (worker group)
-		if (p_Id + i * THREADS < num_spins)
+		int j = p_Id + i * THREADS;
+		if (j < num_spins)
 		{
-			// Original expression
-			// sh_mem_spins_Energy[p_Id] += (- 0.5f ) * gpuAdjMat[p_Id + (i * THREADS) + (vertice_Id * stride_jump_each_vertice)] * ((float)gpuSpins[p_Id + i * THREADS]);
-			sh_mem_spins_Energy[p_Id] += (0.5f) * gpuAdjMat[p_Id + (i * THREADS) + (vertice_Id * stride_jump_each_vertice)] * ((float)gpuSpins[p_Id + i * THREADS]);
+			float Jij = gpuAdjMat[j + (vertice_Id * stride_jump_each_vertice)];
+			float sj = (float)gpuSpins[j];
+			sh_mem_spins_Energy[p_Id] += Jij * sj;
 		}
 	}
 	__syncthreads();
 
-
-  for (int off = blockDim.x/2; off; off /= 2) {
-     if (threadIdx.x < off) {
-         sh_mem_spins_Energy[threadIdx.x] += sh_mem_spins_Energy[threadIdx.x + off];
-       }
-   __syncthreads();
-   }
- 
+	// Parallel reduction
+	for (int off = blockDim.x/2; off; off /= 2) {
+		if (threadIdx.x < off) {
+			sh_mem_spins_Energy[threadIdx.x] += sh_mem_spins_Energy[threadIdx.x + off];
+		}
+		__syncthreads();
+	}
 
 	if (p_Id == 0)
 	{
- 		// Original vertice_energy
-		// float vertice_energy = ((float)gpuSpins[vertice_Id]) * ( sh_mem_spins_Energy[0] - gpuLinTermsVect[vertice_Id] );
-		float vertice_energy = ((float)gpuSpins[vertice_Id]) * ( sh_mem_spins_Energy[0] + gpuLinTermsVect[vertice_Id] );
-		// hamiltonian_per_spin[vertice_Id] = vertice_energy;// each threadblock updates its own memory location
-
-//		printf("vertice_energy  %f \n", vertice_energy);
+		// Energy contribution from this spin
+		// For symmetric J with zero diagonal: multiply by 0.5 to avoid double counting
+		// The 0.5 factor accounts for counting each edge twice (once from each endpoint)
+		float J_term = 0.5f * current_spin * sh_mem_spins_Energy[0];
+		float h_term = current_spin * gpuLinTermsVect[vertice_Id];
+		float vertice_energy = J_term + h_term;
+		
 		atomicAdd(total_energy, vertice_energy);
 	}
-
-	//        printf("%d total %.1f",blockIdx.x, total_energy);
 }
 
-// fINAL lattice spins
+// Fixed version of final_spins_total_energy
 __global__ void final_spins_total_energy(float* gpuAdjMat, unsigned int* gpuAdjMatSize,
 	float* gpuLinTermsVect,
 	signed char* gpuSpins,
 	const unsigned int* gpu_num_spins,
 	float* total_energy) {
 
-	unsigned int vertice_Id = blockIdx.x; // actual spin id in this threadBlock
-	unsigned int p_Id = threadIdx.x;// which worker id
+	unsigned int vertice_Id = blockIdx.x;
+	unsigned int p_Id = threadIdx.x;
 
 	__shared__ float sh_mem_spins_Energy[THREADS];
 	sh_mem_spins_Energy[p_Id] = 0;
@@ -858,20 +858,22 @@ __global__ void final_spins_total_energy(float* gpuAdjMat, unsigned int* gpuAdjM
 	unsigned int num_spins = gpu_num_spins[0];
 	int num_iter = (num_spins + THREADS - 1) / THREADS;
 
-	// num_iter data chucks 
+	float current_spin = (float)gpuSpins[vertice_Id];
+
+	// Compute sum_j J_ij * s_j (full sum, no 0.5 factor here)
 	for (int i = 0; i < num_iter; i++)
 	{
-		// p_Id (worker group)
-		if (p_Id + i * THREADS < num_spins)
+		int j = p_Id + i * THREADS;
+		if (j < num_spins)
 		{
-			// Original expression
-			// sh_mem_spins_Energy[p_Id] += (-0.5f) * gpuAdjMat[p_Id + (i * THREADS) + (vertice_Id * stride_jump_each_vertice)] * ((float)gpuSpins[p_Id + i * THREADS]);
-			sh_mem_spins_Energy[p_Id] += (0.5f) * gpuAdjMat[p_Id + (i * THREADS) + (vertice_Id * stride_jump_each_vertice)] * ((float)gpuSpins[p_Id + i * THREADS]);
+			float Jij = gpuAdjMat[j + (vertice_Id * stride_jump_each_vertice)];
+			float sj = (float)gpuSpins[j];
+			sh_mem_spins_Energy[p_Id] += Jij * sj;
 		}
 	}
 	__syncthreads();
 
-
+	// Parallel reduction
 	for (int off = blockDim.x / 2; off; off /= 2) {
 		if (threadIdx.x < off) {
 			sh_mem_spins_Energy[threadIdx.x] += sh_mem_spins_Energy[threadIdx.x + off];
@@ -879,20 +881,17 @@ __global__ void final_spins_total_energy(float* gpuAdjMat, unsigned int* gpuAdjM
 		__syncthreads();
 	}
 
-
 	if (p_Id == 0)
 	{
-        // Original vertice energy
-		// float vertice_energy = ((float)gpuSpins[vertice_Id]) * ( sh_mem_spins_Energy[0] - gpuLinTermsVect[vertice_Id] );
-		float vertice_energy = ((float)gpuSpins[vertice_Id]) * ( sh_mem_spins_Energy[0] + gpuLinTermsVect[vertice_Id] );
-		// hamiltonian_per_spin[vertice_Id] = vertice_energy;// each threadblock updates its own memory location
-
-		//printf("vertice_energy  %d %f \n",vertice_Id, vertice_energy);
+		// Energy contribution from this spin
+		float J_term = 0.5f * current_spin * sh_mem_spins_Energy[0];
+		float h_term = current_spin * gpuLinTermsVect[vertice_Id];
+		float vertice_energy = J_term + h_term;
+		
 		atomicAdd(total_energy, vertice_energy);
 	}
-
-	//        printf("%d total %.1f",blockIdx.x, total_energy);
 }
+
 
 // Initialize lattice spins
 __global__ void preprocess_max_cut_from_ising(float* gpuAdjMat, unsigned int* gpuAdjMatSize,
