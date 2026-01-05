@@ -128,7 +128,7 @@ __global__ void preprocess_max_cut_from_ising(float* gpuAdjMat, unsigned int* gp
 	int* plus_one_spin,
 	int* minus_one_spin);
 
-std::vector<double> create_beta_schedule_linear(uint32_t num_sweeps, double beta_start, double beta_end = -1.f);
+std::vector<double> create_beta_schedule_geometric(uint32_t num_sweeps, double temp_start, double temp_end, double alpha);
 
 __device__ volatile int sem = 0;
 
@@ -164,6 +164,9 @@ static void usage(const char *pname) {
 		"\t-n|--niters <INT>\n"
 		"\t\tnumber of iterations\n"
 		"\n"
+		"\t-r|--alpha <FLOAT>\n"
+		"\t\tcooling rate (temperature multiplier, 0 < alpha < 1, default: 0.95)"
+		"\n"
 		"\t-n|--sweeps_per_beta <INT>\n"
 		"\t\tnumber of sweep per temperature\n"
 		"\n"
@@ -187,6 +190,7 @@ int main(int argc, char* argv[])
 
   float start_temp = 20.f;
   float stop_temp = 0.001f;
+  float alpha = 0.95f;
   unsigned long long seed = ((getpid()* rand()) & 0x7FFFFFFFF); //((GetCurrentProcessId()* rand()) & 0x7FFFFFFFF);
   
   unsigned int num_temps = 1000; //atoi(argv[2]);
@@ -206,6 +210,7 @@ int main(int argc, char* argv[])
 			{     "start_temp", required_argument, 0, 'x'},
 			{     "stop_temp", required_argument, 0, 'y'},
 			{          "seed", required_argument, 0, 's'},
+			{ "alpha", required_argument, 0, 'c'},
 			{        "niters", required_argument, 0, 'n'},
 			{ "sweeps_per_beta", required_argument, 0, 'm'},
 			{ "write-lattice",       no_argument, 0, 'o'},
@@ -231,6 +236,9 @@ int main(int argc, char* argv[])
 			stop_temp = atof(optarg); break;
 		case 's':
 			seed = atoll(optarg);
+			break;
+		case 'c': 
+			alpha = atof(optarg); 
 			break;
 		case 'n':
 			num_temps = atoi(optarg); break;
@@ -386,7 +394,7 @@ int main(int argc, char* argv[])
 	gpu_best_energy[0] = gpu_total_energy[0];
 
 	std::cout << "start annealing with initial energy: " << gpu_best_energy[0] << std::endl;
-	std::vector<double> beta_schedule = create_beta_schedule_linear(num_temps, start_temp, stop_temp);
+	std::vector<double> beta_schedule = create_beta_schedule_geometric(num_temps, start_temp, stop_temp, alpha);
 
 
   std::string out_filename = "avgmagnet_";  
@@ -860,19 +868,22 @@ __global__ void preprocess_max_cut_from_ising(float* gpuAdjMat, unsigned int* gp
 }
 
 
-std::vector<double> create_beta_schedule_linear(uint32_t num_sweeps, double beta_start, double beta_end)
+std::vector<double> create_beta_schedule_geometric(uint32_t num_sweeps, double temp_start, double temp_end, double alpha)
 {
 	std::vector<double> beta_schedule;
-	double beta_max;
-	if (beta_end == -1)
-		beta_max = (1/1000)*beta_start;//  here temperature will be zero when beta_max is 1000.f
-	else
-		beta_max = beta_end;
-	double diff = (beta_start - beta_max) / (num_sweeps - 1);// A.P 3.28 - 0.01 inverse value increa finnal decrease
+	double current_temp = temp_start;
+	
+	// Calculate required iterations to reach temp_end (if num_sweeps not specified)
+	num_sweeps = log(temp_end / temp_start) / log(alpha)
+	
 	for (int i = 0; i < num_sweeps; i++)
 	{
-		double val = beta_start - (i)*diff;
-		beta_schedule.push_back(( 1.f /val));
+		beta_schedule.push_back(1.0 / current_temp);
+		current_temp *= alpha;
+		
+		if (current_temp < temp_end) {
+			current_temp = temp_end;  // Floor at minimum temperature
+		}
 	}
 	
 	return beta_schedule;
