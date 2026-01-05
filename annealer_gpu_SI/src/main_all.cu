@@ -164,7 +164,7 @@ static void usage(const char *pname) {
 		"\t-n|--niters <INT>\n"
 		"\t\tnumber of iterations\n"
 		"\n"
-		"\t-r|--alpha <FLOAT>\n"
+		"\t-c|--alpha <FLOAT>\n"
 		"\t\tcooling rate (temperature multiplier, 0 < alpha < 1, default: 0.95)"
 		"\n"
 		"\t-n|--sweeps_per_beta <INT>\n"
