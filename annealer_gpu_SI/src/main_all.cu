@@ -874,7 +874,7 @@ std::vector<double> create_beta_schedule_geometric(uint32_t num_sweeps, double t
 	double current_temp = temp_start;
 	
 	// Calculate required iterations to reach temp_end (if num_sweeps not specified)
-	num_sweeps = log(temp_end / temp_start) / log(alpha)
+	num_sweeps = log(temp_end / temp_start) / log(alpha);
 	
 	for (int i = 0; i < num_sweeps; i++)
 	{
