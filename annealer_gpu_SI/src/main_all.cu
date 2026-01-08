@@ -494,10 +494,9 @@ if(debug)
   if(debug)
     fprintf(fptr, "Temperature %.6f magnet %.6f \n", 1.f/beta_schedule.at(i),  gpu_avg_magnetism[0]); 
 
+  energy_history.push_back(gpu_best_energy[0]);
 
 	}
-
-	energy_history.push_back(gpu_best_energy[0]);
  
 	auto t1 = std::chrono::high_resolution_clock::now();
 
