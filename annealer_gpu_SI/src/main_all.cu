@@ -199,7 +199,8 @@ int main(int argc, char* argv[])
   
   // bool do_write = false;
   bool debug = false;
-  
+
+  std::vector<float> energy_history;  // Store best energy at each iteration
 
   std::cout << "Start parsing the file " << std::endl;
 
@@ -485,6 +486,8 @@ if(debug)
 
 
 	}
+
+	energy_history.push_back(gpu_best_energy[0]);
  
 	auto t1 = std::chrono::high_resolution_clock::now();
 
@@ -494,9 +497,25 @@ if(debug)
 	double annealing_duration = (double)std::chrono::duration_cast<std::chrono::microseconds>(annealing_end - annealing_start).count();
 	printf("Total annealing time: %.6f seconds\n", annealing_duration * 1e-6);
 
+	// Write energy history to file for plotting
+	std::string energy_filename = "energy_history_";
+	{
+	    int pos = filename.find_last_of("_");
+	    std::string sub = filename.substr(pos + 1);
+	    energy_filename += sub;
+	}
+	
+	FILE* energy_fptr = fopen(energy_filename.c_str(), "w");
+	fprintf(energy_fptr, "# Iteration\tBest_Energy\n");
+	for (int i = 0; i < energy_history.size(); i++)
+	{
+	    fprintf(energy_fptr, "%d\t%.6f\n", i, energy_history[i]);
+	}
+	fclose(energy_fptr);
+	// printf("Energy history written to: %s\n", energy_filename.c_str());
 
-  fprintf(fptr, "duration %.3f \n", (duration * 1e-6) );
-  fclose(fptr);
+	fprintf(fptr, "duration %.3f \n", (duration * 1e-6) );
+	fclose(fptr);
 
  
  // @R Debugging 
