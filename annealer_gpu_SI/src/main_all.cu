@@ -176,6 +176,9 @@ static void usage(const char *pname) {
 		"\t-s|--debug \n"
 		"\t\t Print the final lattice value and shows avg magnetization at every temperature\n"
 		"\n"
+		"\t-e|--no-early-stop\n"
+		"\t\tDisable early stopping - run full annealing schedule\n"
+		"\n"
 		"\t-o|--write-lattice\n"
 		"\t\twrite final lattice configuration to file\n\n",
 		bname);
@@ -199,6 +202,7 @@ int main(int argc, char* argv[])
   
   // bool do_write = false;
   bool debug = false;
+  bool disable_early_stop = false;
 
   std::vector<float> energy_history;  // Store best energy at each iteration
 
@@ -216,12 +220,13 @@ int main(int argc, char* argv[])
 			{ "sweeps_per_beta", required_argument, 0, 'm'},
 			{ "write-lattice",       no_argument, 0, 'o'},
 			{          "debug",       no_argument, 0, 'd'},
+			{ "no-early-stop",       no_argument, 0, 'e'},
 			{          "help",       no_argument, 0, 'h'},
 			{               0,                 0, 0,   0}
 		};
 
 		int option_index = 0;
-		int ch = getopt_long(argc, argv, "a:l:x:y:s:c:n:m:odh", long_options, &option_index);
+		int ch = getopt_long(argc, argv, "a:l:x:y:s:c:n:m:odeh", long_options, &option_index);
 		if (ch == -1) break;
 
 		switch (ch) {
@@ -250,6 +255,8 @@ int main(int argc, char* argv[])
 			//do_write = true; break;
  		case 'd':
 			debug = true; break;
+		case 'e':
+		    disable_early_stop = true; break;
 		case 'h':
 			usage(argv[0]); break;
 		case '?':
@@ -459,15 +466,18 @@ int main(int argc, char* argv[])
        
        gpu_best_energy[0] = std::min(gpu_total_energy[0], gpu_best_energy[0]);
     	 
-       if (  (gpu_best_energy[0] - gpu_total_energy[0]) < CHANGE_MAX_ENERGY)
+       if ((gpu_best_energy[0] - gpu_total_energy[0]) < CHANGE_MAX_ENERGY)
   		  	no_update = 0;
   		 else
   		  	no_update++;
-  	//	printf("cur engy %.1f best engy %.1f \n", gpu_total_energy[0], gpu_best_energy[0]);
-  		if (no_update > (BREAK_AFTER_ITERATION) * num_sweeps_per_beta)
-  			{
-        break;
-        }
+  		// printf("cur engy %.1f best engy %.1f \n", gpu_total_energy[0], gpu_best_energy[0]);
+
+		// Only check early stopping if not disabled
+		if (!disable_early_stop && no_update > (BREAK_AFTER_ITERATION) * num_sweeps_per_beta)
+		{
+		    printf("Breaking early at temperature iteration %d due to convergence\n", i);
+		    break;
+		}
               
 // @R Debugging
 if(debug)
