@@ -381,7 +381,9 @@ int main(int argc, char* argv[])
  	
    starttime = rtclock();
 
-	init_spins_total_energy << < num_spins, THREADS >> > (gpuAdjMat, gpu_adj_mat_size,
+	init_spins_total_energy << < num_spins, THREADS >> > (row_ptr, 
+		col_idx, 
+		J_values,
 		gpuLinTermsVect,
 		gpu_randvals,
 		gpu_spins,
@@ -610,8 +612,9 @@ if(debug)
 	// std::cout << "\telapsed time in sec: " << duration * 1e-6 << std::endl;
  
 	cudaFree(gpu_randvals);
-	cudaFree(gpuAdjMat);
-	cudaFree(gpu_adj_mat_size);
+	cudaFree(row_ptr);
+	cudaFree(col_idx);
+	cudaFree(J_values);
 	cudaFree(gpu_num_spins);
 	cudaFree(gpu_spins);
 	return 0;
@@ -624,7 +627,9 @@ if(debug)
 
 #if CORRECT
 
-__global__ void changeInLocalEnePerSpin(float* gpuAdjMat, unsigned int* gpuAdjMatSize,
+__global__ void changeInLocalEnePerSpin(const int* row_ptr,
+    const int* col_idx,
+    const float* J_values,
 	float* gpuLinTermsVect,
 	const float* __restrict__ randvals,
 	signed char* gpuLatSpin,
@@ -712,7 +717,9 @@ __global__ void changeInLocalEnePerSpin(float* gpuAdjMat, unsigned int* gpuAdjMa
 #endif
 
 // Initialize lattice spins
-__global__ void init_spins_total_energy(float* gpuAdjMat, unsigned int* gpuAdjMatSize,
+__global__ void init_spins_total_energy(const int* row_ptr,
+    const int* col_idx,
+    const float* J_values,
 	float* gpuLinTermsVect,
 	const float* __restrict__ randvals,
 	signed char* gpuSpins,
@@ -783,7 +790,9 @@ __global__ void init_spins_total_energy(float* gpuAdjMat, unsigned int* gpuAdjMa
 }
 
 // fINAL lattice spins
-__global__ void final_spins_total_energy(float* gpuAdjMat, unsigned int* gpuAdjMatSize,
+__global__ void final_spins_total_energy(const int* row_ptr,
+    const int* col_idx,
+    const float* J_values,
 	float* gpuLinTermsVect,
 	signed char* gpuSpins,
 	const unsigned int* gpu_num_spins,
@@ -842,7 +851,9 @@ __global__ void final_spins_total_energy(float* gpuAdjMat, unsigned int* gpuAdjM
 }
 
 // Initialize lattice spins
-__global__ void preprocess_max_cut_from_ising(float* gpuAdjMat, unsigned int* gpuAdjMatSize,
+__global__ void preprocess_max_cut_from_ising(const int* row_ptr,
+    const int* col_idx,
+    const float* J_values,
 	signed char* gpuSpins,
 	const unsigned int* gpu_num_spins,
 	float* max_cut_value,
@@ -921,7 +932,7 @@ std::vector<double> create_beta_schedule_geometric(uint32_t num_sweeps, double t
 	return beta_schedule;
 }
 
-__global__ void d_debug_kernel(float* gpuAdjMat, unsigned int* gpuAdjMatSize, signed char* gpu_spins, signed char* gpu_spins_1, const unsigned int* gpu_num_spins)
+__global__ void d_debug_kernel(const int* row_ptr, const int* col_idx, const float* J_values, signed char* gpu_spins, signed char* gpu_spins_1, const unsigned int* gpu_num_spins)
 {
 	int ones = 0;
 	int ones_1 = 0;
