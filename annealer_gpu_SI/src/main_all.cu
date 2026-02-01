@@ -442,7 +442,9 @@ int main(int argc, char* argv[])
    {         
         cudaEventRecord(start); 
    }
-      	changeInLocalEnePerSpin << < num_spins, THREADS >> > (gpuAdjMat, gpu_adj_mat_size,
+      	changeInLocalEnePerSpin << < num_spins, THREADS >> > (row_ptr, 
+				col_idx, 
+				J_values,
 				gpuLinTermsVect,
       			gpu_randvals,
       			gpu_spins,
@@ -528,8 +530,7 @@ if(debug)
 
  
  // @R Debugging 
-/*	d_debug_kernel << < 1, 1 >> > (gpuAdjMat,
-		gpu_adj_mat_size,
+/*	d_debug_kernel << < 1, 1 >> > (row_ptr, col_idx, J_values,
 		gpu_spins,
 		gpu_spins_1,
 		gpu_num_spins);
@@ -546,14 +547,17 @@ if(debug)
 
    {
 
-       final_spins_total_energy << < num_spins, THREADS >> > (gpuAdjMat, gpu_adj_mat_size,
+       final_spins_total_energy << < num_spins, THREADS >> > (row_ptr, 
+						col_idx, 
+						J_values,
                         gpuLinTermsVect,
                         gpu_spins,
                         gpu_num_spins,
                         gpu_total_energy);
 
-       preprocess_max_cut_from_ising << < num_spins, THREADS >> > (gpuAdjMat,
-  				gpu_adj_mat_size,
+       preprocess_max_cut_from_ising << < num_spins, THREADS >> > (row_ptr, 
+				col_idx, 
+				J_values,
   				gpu_spins,
   				gpu_num_spins,
   				gpu_max_cut_value,
