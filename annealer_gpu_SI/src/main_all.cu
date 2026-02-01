@@ -73,7 +73,7 @@ inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort =
 	}
 }
 
-__global__ void d_debug_kernel(float* gpuAdjMat, unsigned int* gpuAdjMatSize, signed char* gpu_spins, signed char* gpu_spins_1, const unsigned int* gpu_num_spins);
+__global__ void d_debug_kernel(const int* row_ptr, const int* col_idx, const float* J_values, signed char* gpu_spins, signed char* gpu_spins_1, const unsigned int* gpu_num_spins);
 
 
 __global__ void init_best_energy(float* total_energy, float* best_energy, bool init = false)
@@ -93,7 +93,7 @@ __global__ void init_best_energy(float* total_energy, float* best_energy, bool i
 
 
 // Initialize lattice spins
-__global__ void init_spins_total_energy(float* gpuAdjMat, unsigned int* gpuAdjMatSize,
+__global__ void init_spins_total_energy(const int* row_ptr, const int* col_idx, const float* J_values,
 	float* gpuLinTermsVect,
 	const float* __restrict__ randvals,
 	signed char* gpuSpins,
@@ -103,13 +103,13 @@ __global__ void init_spins_total_energy(float* gpuAdjMat, unsigned int* gpuAdjMa
 	unsigned long seed);
 
 // fINAL lattice spins
-__global__ void final_spins_total_energy(float* gpuAdjMat, unsigned int* gpuAdjMatSize,
+__global__ void final_spins_total_energy(const int* row_ptr, const int* col_idx, const float* J_values,
        float* gpuLinTermsVect,
        signed char* gpuSpins,
        const unsigned int* gpu_num_spins,
        float* total_energy);
 
-__global__ void changeInLocalEnePerSpin(float* gpuAdjMat, unsigned int* gpuAdjMatSize,
+__global__ void changeInLocalEnePerSpin(const int* row_ptr, const int* col_idx, const float* J_values,
 	float* gpuLinTermsVect,
 	const float* __restrict__ randvals,
 	signed char* gpuLatSpin,
@@ -121,7 +121,7 @@ __global__ void changeInLocalEnePerSpin(float* gpuAdjMat, unsigned int* gpuAdjMa
 __global__ void d_avg_magnetism(signed char* gpuSpins, const unsigned int* gpu_num_spins, float* avg_magnetism);
 
 // Initialize lattice spins
-__global__ void preprocess_max_cut_from_ising(float* gpuAdjMat, unsigned int* gpuAdjMatSize,
+__global__ void preprocess_max_cut_from_ising(const int* row_ptr, const int* col_idx, const float* J_values,
 	signed char* gpuSpins,
 	const unsigned int* gpu_num_spins,
 	float* max_cut_value,
