@@ -795,20 +795,15 @@ __global__ void final_spins_total_energy(const int* row_ptr,
 	sh_mem_spins_Energy[p_Id] = 0;
 	__syncthreads();
 
-	unsigned int stride_jump_each_vertice = sqrt((float)gpuAdjMatSize[0]);
-	unsigned int num_spins = gpu_num_spins[0];
-	int num_iter = (num_spins + THREADS - 1) / THREADS;
-
-	// num_iter data chucks 
-	for (int i = 0; i < num_iter; i++)
+	// --- Sparse adjacency traversal ---
+	int start = gpu_row_ptr[vertice_Id];
+	int end   = gpu_row_ptr[vertice_Id + 1];
+	
+	for (int k = start + p_Id; k < end; k += blockDim.x)
 	{
-		// p_Id (worker group)
-		if (p_Id + i * THREADS < num_spins)
-		{
-			// Original expression
-			// sh_mem_spins_Energy[p_Id] += (-0.5f) * gpuAdjMat[p_Id + (i * THREADS) + (vertice_Id * stride_jump_each_vertice)] * ((float)gpuSpins[p_Id + i * THREADS]);
-			sh_mem_spins_Energy[p_Id] += gpuAdjMat[p_Id + (i * THREADS) + (vertice_Id * stride_jump_each_vertice)] * ((float)gpuSpins[p_Id + i * THREADS]);
-		}
+	    int j = gpu_col_idx[k];
+	    float Jij = gpu_J_values[k];
+	    sh_mem_spins_Energy[p_Id] += Jij * (float)gpuSpins[j];
 	}
 	__syncthreads();
 
