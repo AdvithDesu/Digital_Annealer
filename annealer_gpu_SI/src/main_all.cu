@@ -654,26 +654,21 @@ __global__ void changeInLocalEnePerSpin(const int* row_ptr,
 
 	float current_spin_shared_mem;
 
-
 	current_spin_shared_mem = (float)gpuLatSpin[vertice_Id];
 
-
-	unsigned int stride_jump_each_vertice = sqrt((float)gpuAdjMatSize[0]);
-	unsigned int num_spins = gpu_num_spins[0];
-	int num_iter = int((num_spins) / THREADS) + 1;// @R (num_spins + THREADS - 1) / THREADS;
-
-	// placing all the spins data into the shared memory..
-	// hence, decouple the spins to the global spins
-	for (int i = 0; i < num_iter; i++)
+	// --- Sparse adjacency traversal ---
+	// For vertex vertice_Id, neighbors are in
+	// [row_ptr[vertice_Id], row_ptr[vertice_Id + 1])
+	
+	int start = gpu_row_ptr[vertice_Id];
+	int end   = gpu_row_ptr[vertice_Id + 1];
+	
+	// Each thread accumulates over a strided subset of neighbors
+	for (int k = start + p_Id; k < end; k += blockDim.x)
 	{
-		if (p_Id + i * THREADS < num_spins)
-		{
-			float current_spin;
-			current_spin = (float)gpuLatSpin[p_Id + i * THREADS];
-        
-			sh_mem_spins_Energy[p_Id] += gpuAdjMat[p_Id + (i * THREADS) + (vertice_Id * stride_jump_each_vertice)] * (current_spin);
- 		       
-		}
+	    int j = gpu_col_idx[k];                // neighbor index
+	    float Jij = gpu_J_values[k];           // coupling value
+	    sh_mem_spins_Energy[p_Id] += Jij * (float)gpuLatSpin[j];
 	}
 	__syncthreads();
 
