@@ -309,12 +309,33 @@ int main(int argc, char* argv[])
 
 	gpuErrchk(cudaMemcpy(gpuLinTermsVect, linearTermsVect.data(), (num_spins) * sizeof(float), cudaMemcpyHostToDevice));
 
-	float *gpuAdjMat;
-	gpuErrchk(cudaMalloc((void**)&gpuAdjMat, (adj_mat_size) * sizeof(float)));
- 
+	// ---- Allocate sparse J (CSR format) on GPU ----
+
+	int* gpu_row_ptr = nullptr;
+	int* gpu_col_idx = nullptr;
+	float* gpu_J_values = nullptr;
+	
+	size_t num_spins = row_ptr.size() - 1;
+	size_t nnz = J_values.size();
+
 	starttime = rtclock();
-	gpuErrchk(cudaMemcpy(gpuAdjMat, adjMat.data(), (adj_mat_size) * sizeof(float), cudaMemcpyHostToDevice));
-  endtime = rtclock();
+	
+	// row_ptr
+	gpuErrchk(cudaMalloc((void**)&gpu_row_ptr, (num_spins + 1) * sizeof(int)));
+	
+	gpuErrchk(cudaMemcpy(gpu_row_ptr, row_ptr.data(), (num_spins + 1) * sizeof(int), cudaMemcpyHostToDevice));
+	
+	// col_idx
+	gpuErrchk(cudaMalloc((void**)&gpu_col_idx, nnz * sizeof(int)));
+	
+	gpuErrchk(cudaMemcpy(gpu_col_idx, col_idx.data(), nnz * sizeof(int), cudaMemcpyHostToDevice));
+	
+	// J values
+	gpuErrchk(cudaMalloc((void**)&gpu_J_values, nnz * sizeof(float)));
+	
+	gpuErrchk(cudaMemcpy(gpu_J_values, J_values.data(), nnz * sizeof(float), cudaMemcpyHostToDevice));
+
+	endtime = rtclock();
    
   if(debug)
      printtime("J Matrix data transfer time: ", starttime, endtime);
