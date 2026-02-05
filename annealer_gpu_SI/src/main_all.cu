@@ -152,8 +152,14 @@ static void usage(const char *pname) {
 	fprintf(stdout,
 		"Usage: %s [options]\n"
 		"options:\n"
-		"\t-i|--J_Matrix_file <FILENAME>\n"
-		"\t\tConnectivity matrix (no multiple connection between same nodes)\n"
+		"\t-R|--row_ptr_file <FILENAME>\n"
+		"\t\t Row pointer vector for J values (indicating start of new row in J matrix)\n"
+		"\n"
+		"\t-C|--col_idx_file <FILENAME>\n"
+		"\t\t Column Index vector for J values (indicating position of non-zero values in specific row)\n"
+		"\n"
+		"\t-V|--values_file  <FILENAME>\n"
+		"\t\t Vector of all non-zero J matrix values arranged in CSR format \n"
 		"\n"
 		"\t-x|--start temperature <FLOAT>\n"
 		"\t\t \n"
@@ -188,7 +194,11 @@ static void usage(const char *pname) {
 int main(int argc, char* argv[])
 {
 
-  std::string filename = "";//argv[1]
+  // arguments for files required by the CSR representation
+  std::string row_ptr_file = "";
+  std::string col_idx_file = "";
+  std::string values_file  = "";
+
   std::string linear_file = "";
 
   float start_temp = 20.f;
@@ -210,7 +220,9 @@ int main(int argc, char* argv[])
 
   while (1) {
 		static struct option long_options[] = {
-			{     "J_Matrix_file", required_argument, 0, 'a'},
+			{ "row_ptr_file", required_argument, 0, 'R' },
+			{ "col_idx_file", required_argument, 0, 'C' },
+			{ "values_file",  required_argument, 0, 'V' },
 			{ "Linear_file", required_argument, 0, 'l' },
 			{     "start_temp", required_argument, 0, 'x'},
 			{     "stop_temp", required_argument, 0, 'y'},
@@ -232,8 +244,12 @@ int main(int argc, char* argv[])
 		switch (ch) {
 		case 0:
 			break;
-		case 'a':
-			filename = (optarg); break;
+		case 'R':
+		    row_ptr_file = optarg; break;
+		case 'C':
+		    col_idx_file = optarg; break;
+		case 'V':
+		    values_file = optarg; break;
 		case 'l':
 			linear_file = (optarg); break;
 		case 'x':
