@@ -420,9 +420,9 @@ int main(int argc, char* argv[])
  	
    starttime = rtclock();
 
-	init_spins_total_energy << < num_spins, THREADS >> > (row_ptr, 
-		col_idx, 
-		J_values,
+	init_spins_total_energy << < num_spins, THREADS >> > (gpu_row_ptr,
+    	gpu_col_idx,
+    	gpu_J_values,
 		gpuLinTermsVect,
 		gpu_randvals,
 		gpu_spins,
@@ -483,9 +483,9 @@ int main(int argc, char* argv[])
    {         
         cudaEventRecord(start); 
    }
-      	changeInLocalEnePerSpin << < num_spins, THREADS >> > (row_ptr, 
-				col_idx, 
-				J_values,
+      	changeInLocalEnePerSpin << < num_spins, THREADS >> > (gpu_row_ptr,
+		    	gpu_col_idx,
+		    	gpu_J_values,
 				gpuLinTermsVect,
       			gpu_randvals,
       			gpu_spins,
@@ -588,17 +588,17 @@ if(debug)
 
    {
 
-       final_spins_total_energy << < num_spins, THREADS >> > (row_ptr, 
-						col_idx, 
-						J_values,
+       final_spins_total_energy << < num_spins, THREADS >> > (gpu_row_ptr,
+				    	gpu_col_idx,
+				    	gpu_J_values,
                         gpuLinTermsVect,
                         gpu_spins,
                         gpu_num_spins,
                         gpu_total_energy);
 
-       preprocess_max_cut_from_ising << < num_spins, THREADS >> > (row_ptr, 
-				col_idx, 
-				J_values,
+       preprocess_max_cut_from_ising << < num_spins, THREADS >> > (gpu_row_ptr,
+		    	gpu_col_idx,
+		    	gpu_J_values,
   				gpu_spins,
   				gpu_num_spins,
   				gpu_max_cut_value,
@@ -617,8 +617,6 @@ if(debug)
 
  if(debug)
  {
- 
-
  
   std::string spins_filename = "spins_";  
   
