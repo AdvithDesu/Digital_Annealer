@@ -24,18 +24,6 @@
 #define CHANGE_MAX_ENERGY 0.0f
 #define BREAK_AFTER_ITERATION 1.0f
 //__constant__ float kd_floats[1000000];
-void printVecOfVec(std::vector<float> adjMat)
-{
-	std::cout << "\n";
-	for (int j = 0; j < sqrt(adjMat.size()); j++) {
-		for (int i = 0; i < sqrt(adjMat.size()); i++)
-		{
-			std::cout << adjMat[i + sqrt(adjMat.size())*j] << '\t';
-		}
-		std::cout << "\n";
-	}
-
-}
 
 // float atomicMin
 __device__ __forceinline__ float mAtomicMin(float *address, float val)
