@@ -645,9 +645,9 @@ if(debug)
 	std::cout << "\tbest max cut value: " << gpu_best_max_cut_value[0] << std::endl;
 	// std::cout << "\telapsed time in sec: " << duration * 1e-6 << std::endl;
  
-	cudaFree(gpu_randvals);
-	cudaFree(row_ptr);
-	cudaFree(col_idx);
+	cudaFree(gpu_row_ptr);
+	cudaFree(gpu_col_idx);
+	cudaFree(gpu_J_values);
 	cudaFree(J_values);
 	cudaFree(gpu_num_spins);
 	cudaFree(gpu_spins);
