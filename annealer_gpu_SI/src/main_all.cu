@@ -284,14 +284,17 @@ int main(int argc, char* argv[])
 	}
 
     std::cout << "filename " << filename << " linear filename " << linear_file << " start temp " << start_temp << " stop temp " << stop_temp << " seed " << seed << " num temp " << num_temps << " num sweeps " <<  num_sweeps_per_beta << std::endl;
-	std::vector<float> adjMat;// float
+	
+	// ---------------- Sparse J loading ----------------
+	if (row_ptr_file.empty() || col_idx_file.empty() || values_file.empty()) {
+	    std::cerr << "ERROR: Must provide --row_ptr_file, --col_idx_file, and --values_file\n";
+	    exit(1);
+	}
+
  	double starttime = rtclock();
-	// Parse data for dense J matrix 
-	// ParseData parseData(filename, adjMat);
 
 	// Parse data for CSR representation of J matrix
 	ParseSparseData parseSparse(row_ptr_file, col_idx_file, values_file);
-
 
     std::cout << "ParseData constructed successfully" << std::endl;
 
@@ -304,9 +307,15 @@ int main(int argc, char* argv[])
     if(debug)
   	  printtime("ParseData time: ", starttime, endtime);
 
-	unsigned int adj_mat_size = adjMat.size();
-	auto graphs_data = parseData.getDataDims();//sqrt(adjMat.size());
-	unsigned int num_spins = graphs_data.at(0);
+	unsigned int num_spins = parseSparse.getNumSpins();
+	unsigned int nnz       = parseSparse.getNNZ();
+	
+	const std::vector<int>&    row_ptr = parseSparse.getRowPtr();
+	const std::vector<int>&    col_idx = parseSparse.getColIdx();
+	const std::vector<float>&  J_values = parseSparse.getValues();
+	
+	std::cout << "Sparse J loaded: num_spins = "
+	          << num_spins << ", nnz = " << nnz << std::endl;
 
     // CPU_THREADS does not seem to be used
 	// unsigned int CPU_THREADS = THREADS;//(num_spins < 32) ? num_spins : 32; 
@@ -362,14 +371,9 @@ int main(int argc, char* argv[])
      printtime("J Matrix data transfer time: ", starttime, endtime);
 	//printVecOfVec(adjMat);
 
-	unsigned int* gpu_adj_mat_size;
-	gpuErrchk(cudaMalloc((void**)&gpu_adj_mat_size, sizeof(*gpu_adj_mat_size)));
-	gpuErrchk(cudaMemcpy(gpu_adj_mat_size, &adj_mat_size, sizeof(*gpu_adj_mat_size), cudaMemcpyHostToDevice));
-
 	unsigned int* gpu_num_spins;
 	gpuErrchk(cudaMalloc((void**)&gpu_num_spins, sizeof(*gpu_num_spins)));
 	gpuErrchk(cudaMemcpy(gpu_num_spins, &num_spins, sizeof(*gpu_num_spins), cudaMemcpyHostToDevice));
-	adjMat.clear();// deallcoate vector //@ERROR
 
 	int* gpu_plus_one_spin;
 	cudaHostAlloc(&gpu_plus_one_spin, sizeof(int), 0);
