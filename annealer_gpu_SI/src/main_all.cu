@@ -270,7 +270,12 @@ int main(int argc, char* argv[])
     std::cout << "filename " << filename << " linear filename " << linear_file << " start temp " << start_temp << " stop temp " << stop_temp << " seed " << seed << " num temp " << num_temps << " num sweeps " <<  num_sweeps_per_beta << std::endl;
 	std::vector<float> adjMat;// float
  	double starttime = rtclock();
-	ParseData parseData(filename, adjMat);
+	// Parse data for dense J matrix 
+	// ParseData parseData(filename, adjMat);
+
+	// Parse data for CSR representation of J matrix
+	ParseSparseData parseSparse(row_ptr_file, col_idx_file, values_file);
+
 
     std::cout << "ParseData constructed successfully" << std::endl;
 
