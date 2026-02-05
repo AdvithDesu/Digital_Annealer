@@ -337,9 +337,6 @@ int main(int argc, char* argv[])
 	int* gpu_row_ptr = nullptr;
 	int* gpu_col_idx = nullptr;
 	float* gpu_J_values = nullptr;
-	
-	size_t num_spins = row_ptr.size() - 1;
-	size_t nnz = J_values.size();
 
 	starttime = rtclock();
 	
