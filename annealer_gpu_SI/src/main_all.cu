@@ -311,7 +311,7 @@ int main(int argc, char* argv[])
 //	cudaMemcpyToSymbol( &THREADS, &CPU_THREADS, sizeof(unsigned int));
 	// Setup cuRAND generator
 	
-    std::cout << "adj_mat_size: " << adj_mat_size << " num_spins: " << num_spins << " num of temperature "<< num_temps << " num_sweeps per beta "<< num_sweeps_per_beta << std::endl;
+    std::cout << " num_spins: " << num_spins << " num of temperature "<< num_temps << " num_sweeps per beta "<< num_sweeps_per_beta << std::endl;
 	curandGenerator_t rng;
 	
 	curandCreateGenerator(&rng, CURAND_RNG_PSEUDO_PHILOX4_32_10);
