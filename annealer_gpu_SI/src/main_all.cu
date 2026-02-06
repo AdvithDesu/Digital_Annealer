@@ -179,6 +179,32 @@ static void usage(const char *pname) {
 	exit(EXIT_SUCCESS);
 }
 
+// --------------------------------------------------
+// Extract run suffix from values_file (e.g. J_values_10403.csv -> 10403)
+// --------------------------------------------------
+std::string run_suffix;
+
+{
+    std::string base = values_file;
+
+    // Remove directory path
+    size_t slash_pos = base.find_last_of("/\\");
+    if (slash_pos != std::string::npos)
+        base = base.substr(slash_pos + 1);
+
+    // Remove extension (.csv)
+    size_t dot_pos = base.find_last_of(".");
+    if (dot_pos != std::string::npos)
+        base = base.substr(0, dot_pos);
+
+    // Extract suffix after last underscore
+    size_t underscore_pos = base.find_last_of("_");
+    if (underscore_pos != std::string::npos)
+        run_suffix = base.substr(underscore_pos + 1);
+    else
+        run_suffix = base;  // fallback (should not happen)
+}
+
 int main(int argc, char* argv[])
 {
 
