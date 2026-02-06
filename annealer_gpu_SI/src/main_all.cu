@@ -646,7 +646,6 @@ if(debug)
 	cudaFree(gpu_row_ptr);
 	cudaFree(gpu_col_idx);
 	cudaFree(gpu_J_values);
-	cudaFree(J_values);
 	cudaFree(gpu_num_spins);
 	cudaFree(gpu_spins);
 	return 0;
