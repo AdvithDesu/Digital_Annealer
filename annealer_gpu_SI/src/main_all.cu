@@ -627,24 +627,12 @@ if(debug)
 
  if(debug)
  {
- 
-  std::string spins_filename = "spins_";  
-  
-  std::string adjmat = filename;
-
-  {
-    // Find position of '_' using find()
-    int pos = adjmat.find_last_of("_");
-    // Copy substring after pos
-    std::string sub = adjmat.substr(pos + 1);
-    spins_filename += sub;
-  }
+	std::string spins_filename = "spins_" + run_suffix;
 
  	FILE* fptr1 = fopen(spins_filename.c_str() , "w");
   for(int i = 0; i < num_spins; i++)
   {
         fprintf(fptr1, "%d\t",  (int)cpu_spins[i]);
-
   }  
   fprintf(fptr1,"\n\n\n");
   //fprintf(fptr1,"\tbest energy value: %.6f\n", gpu_best_energy[0] );
