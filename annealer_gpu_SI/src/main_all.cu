@@ -297,7 +297,12 @@ int main(int argc, char* argv[])
 		}
 	}
 
-    std::cout << "filename " << filename << " linear filename " << linear_file << " start temp " << start_temp << " stop temp " << stop_temp << " seed " << seed << " num temp " << num_temps << " num sweeps " <<  num_sweeps_per_beta << std::endl;
+    std::cout << "Running sparse SA with:\n"
+          << "  num_spins = " << num_spins << "\n"
+          << "  nnz       = " << nnz << "\n"
+          << "  run id    = " << run_suffix << "\n"
+		  << " start temp " << start_temp << " stop temp " << stop_temp << "\n" 
+		  << " seed " << seed << " num temp " << num_temps << " num sweeps " <<  num_sweeps_per_beta << std::endl;
 	
 	// ---------------- Sparse J loading ----------------
 	if (row_ptr_file.empty() || col_idx_file.empty() || values_file.empty()) {
