@@ -179,32 +179,6 @@ static void usage(const char *pname) {
 	exit(EXIT_SUCCESS);
 }
 
-// --------------------------------------------------
-// Extract run suffix from values_file (e.g. J_values_10403.csv -> 10403)
-// --------------------------------------------------
-std::string run_suffix;
-
-{
-    std::string base = values_file;
-
-    // Remove directory path
-    size_t slash_pos = base.find_last_of("/\\");
-    if (slash_pos != std::string::npos)
-        base = base.substr(slash_pos + 1);
-
-    // Remove extension (.csv)
-    size_t dot_pos = base.find_last_of(".");
-    if (dot_pos != std::string::npos)
-        base = base.substr(0, dot_pos);
-
-    // Extract suffix after last underscore
-    size_t underscore_pos = base.find_last_of("_");
-    if (underscore_pos != std::string::npos)
-        run_suffix = base.substr(underscore_pos + 1);
-    else
-        run_suffix = base;  // fallback (should not happen)
-}
-
 int main(int argc, char* argv[])
 {
 
@@ -298,11 +272,35 @@ int main(int argc, char* argv[])
 	}
 
     std::cout << "Running sparse SA with:\n"
-          << "  num_spins = " << num_spins << "\n"
-          << "  nnz       = " << nnz << "\n"
-          << "  run id    = " << run_suffix << "\n"
 		  << " start temp " << start_temp << " stop temp " << stop_temp << "\n" 
 		  << " seed " << seed << " num temp " << num_temps << " num sweeps " <<  num_sweeps_per_beta << std::endl;
+
+	// --------------------------------------------------
+	// Extract run suffix from values_file (e.g. J_values_10403.csv -> 10403)
+	// --------------------------------------------------
+	std::string run_suffix;
+	
+	{
+	    std::string base = values_file;
+	
+	    // Remove directory path
+	    size_t slash_pos = base.find_last_of("/\\");
+	    if (slash_pos != std::string::npos)
+	        base = base.substr(slash_pos + 1);
+	
+	    // Remove extension (.csv)
+	    size_t dot_pos = base.find_last_of(".");
+	    if (dot_pos != std::string::npos)
+	        base = base.substr(0, dot_pos);
+	
+	    // Extract suffix after last underscore
+	    size_t underscore_pos = base.find_last_of("_");
+	    if (underscore_pos != std::string::npos)
+	        run_suffix = base.substr(underscore_pos + 1);
+	    else
+	        run_suffix = base;  // fallback (should not happen)
+	}
+
 	
 	// ---------------- Sparse J loading ----------------
 	if (row_ptr_file.empty() || col_idx_file.empty() || values_file.empty()) {
@@ -339,14 +337,8 @@ int main(int argc, char* argv[])
     // CPU_THREADS does not seem to be used
 	// unsigned int CPU_THREADS = THREADS;//(num_spins < 32) ? num_spins : 32; 
 
-//	cudaMemcpyToSymbol( &THREADS, &CPU_THREADS, sizeof(unsigned int));
+    //cudaMemcpyToSymbol( &THREADS, &CPU_THREADS, sizeof(unsigned int));
 	// Setup cuRAND generator
-	
-	std::cout << "num_spins: " << num_spins
-          << " nnz: " << nnz
-          << " num temps: " << num_temps
-          << " sweeps per beta: " << num_sweeps_per_beta
-          << std::endl;
 
 	curandGenerator_t rng;
 	
