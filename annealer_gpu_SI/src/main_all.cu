@@ -468,16 +468,7 @@ int main(int argc, char* argv[])
 	std::cout << "start annealing with initial energy: " << gpu_best_energy[0] << std::endl;
 	std::vector<double> beta_schedule = create_beta_schedule_geometric(num_temps, start_temp, stop_temp, alpha);
 
-
-  std::string out_filename = "avgmagnet_";  
-  std::string in_adjmat = filename;
-  {
-    // Find position of '_' using find()
-    int pos = in_adjmat.find_last_of("_");
-    // Copy substring after pos
-    std::string sub = in_adjmat.substr(pos + 1);
-    out_filename += sub;
-  }
+	std::string out_filename = "avgmagnet_" + run_suffix;
 
  	FILE* fptr = fopen(out_filename.c_str() , "w");
 
