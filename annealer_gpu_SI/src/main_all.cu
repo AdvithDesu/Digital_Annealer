@@ -314,17 +314,17 @@ int main(int argc, char* argv[])
 	ParseSparseData parseSparse(row_ptr_file, col_idx_file, values_file);
 
     std::cout << "ParseData constructed successfully" << std::endl;
+	unsigned int num_spins = parseSparse.getNumSpins();
 
 	std::vector<float> linearTermsVect;
 	//if (linear_file.empty() == false)
-	parseData.readLinearValues(linear_file, linearTermsVect);
+    readLinearValues(linear_file, num_spins, linearTermsVect);
 
 	double endtime = rtclock();
   
     if(debug)
   	  printtime("ParseData time: ", starttime, endtime);
 
-	unsigned int num_spins = parseSparse.getNumSpins();
 	unsigned int nnz       = parseSparse.getNNZ();
 	
 	const std::vector<int>&    row_ptr = parseSparse.getRowPtr();
