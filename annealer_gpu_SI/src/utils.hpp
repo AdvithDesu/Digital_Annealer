@@ -19,6 +19,8 @@ using std::string;
 double rtclock();
 void printtime(const char *str, double starttime, double endtime);
 
+void readLinearValues(const std::string& filename, unsigned int num_spins, std::vector<float>& linearVect);
+
 // =====================================================
 // Legacy dense J parser (UNCHANGED)
 // =====================================================
