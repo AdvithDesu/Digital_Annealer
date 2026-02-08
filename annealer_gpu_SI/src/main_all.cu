@@ -19,7 +19,7 @@
 #define BREAK_UPDATE_VAL 2//1000 
 #define TCRIT 2.26918531421f
 
-#include "annealer_gpu_SI/utils.hpp"
+#include "annealer_gpu_SI/src/utils.hpp"
 
 #define CHANGE_MAX_ENERGY 0.0f
 #define BREAK_AFTER_ITERATION 1.0f
