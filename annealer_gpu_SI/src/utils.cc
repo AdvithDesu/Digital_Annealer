@@ -17,6 +17,41 @@ void printtime(const char *str, double starttime, double endtime)
     printf("%s%3f seconds\n", str, endtime - starttime);
 }
 
+void readLinearValues(const std::string& filename,
+                      unsigned int num_spins,
+                      std::vector<float>& linearVect)
+{
+    if (filename.empty()) {
+        linearVect.assign(num_spins, 0.0f);
+        return;
+    }
+
+    std::ifstream file(filename);
+    if (!file.is_open()) {
+        std::cerr << "WARNING: Could not open h file. Using zeros.\n";
+        linearVect.assign(num_spins, 0.0f);
+        return;
+    }
+
+    std::vector<float> vals;
+    std::string line;
+
+    while (std::getline(file, line)) {
+        if (line.empty()) continue;
+        std::stringstream ss(line);
+        std::string val;
+        while (std::getline(ss, val, ',')) {
+            if (!val.empty())
+                vals.push_back(std::stof(val));
+        }
+    }
+
+    if (vals.size() < num_spins) vals.resize(num_spins, 0.0f);
+    if (vals.size() > num_spins) vals.resize(num_spins);
+
+    linearVect = vals;
+}
+
 // =====================================================
 // Legacy dense J parser (UNCHANGED)
 // =====================================================
