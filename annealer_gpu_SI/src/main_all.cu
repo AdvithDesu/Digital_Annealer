@@ -691,14 +691,14 @@ __global__ void changeInLocalEnePerSpin(const int* row_ptr,
 	// For vertex vertice_Id, neighbors are in
 	// [row_ptr[vertice_Id], row_ptr[vertice_Id + 1])
 	
-	int start = gpu_row_ptr[vertice_Id];
-	int end   = gpu_row_ptr[vertice_Id + 1];
+	int start = row_ptr[vertice_Id];
+	int end   = row_ptr[vertice_Id + 1];
 	
 	// Each thread accumulates over a strided subset of neighbors
 	for (int k = start + p_Id; k < end; k += blockDim.x)
 	{
-	    int j = gpu_col_idx[k];                // neighbor index
-	    float Jij = gpu_J_values[k];           // coupling value
+	    int j = col_idx[k];                // neighbor index
+	    float Jij = J_values[k];           // coupling value
 	    sh_mem_spins_Energy[p_Id] += Jij * (float)gpuLatSpin[j];
 	}
 	__syncthreads();
@@ -771,13 +771,13 @@ __global__ void init_spins_total_energy(const int* row_ptr,
     __syncthreads();
   
 	// --- Sparse adjacency traversal ---
-	int start = gpu_row_ptr[vertice_Id];
-	int end   = gpu_row_ptr[vertice_Id + 1];
+	int start = row_ptr[vertice_Id];
+	int end   = row_ptr[vertice_Id + 1];
 	
 	for (int k = start + p_Id; k < end; k += blockDim.x)
 	{
-	    int j = gpu_col_idx[k];
-	    float Jij = gpu_J_values[k];
+	    int j = col_idx[k];
+	    float Jij = J_values[k];
 	    sh_mem_spins_Energy[p_Id] += Jij * (float)gpuSpins[j];
 	}
 	__syncthreads();
@@ -827,13 +827,13 @@ __global__ void final_spins_total_energy(const int* row_ptr,
 	__syncthreads();
 
 	// --- Sparse adjacency traversal ---
-	int start = gpu_row_ptr[vertice_Id];
-	int end   = gpu_row_ptr[vertice_Id + 1];
+	int start = row_ptr[vertice_Id];
+	int end   = row_ptr[vertice_Id + 1];
 	
 	for (int k = start + p_Id; k < end; k += blockDim.x)
 	{
-	    int j = gpu_col_idx[k];
-	    float Jij = gpu_J_values[k];
+	    int j = col_idx[k];
+	    float Jij = J_values[k];
 	    sh_mem_spins_Energy[p_Id] += Jij * (float)gpuSpins[j];
 	}
 	__syncthreads();
@@ -885,13 +885,13 @@ __global__ void preprocess_max_cut_from_ising(const int* row_ptr,
     __syncthreads();
 
 	// --- Sparse adjacency traversal ---
-	int start = gpu_row_ptr[vertice_Id];
-	int end   = gpu_row_ptr[vertice_Id + 1];
+	int start = row_ptr[vertice_Id];
+	int end   = row_ptr[vertice_Id + 1];
 	
 	for (int k = start + p_Id; k < end; k += blockDim.x)
 	{
-	    int j = gpu_col_idx[k];
-	    float Jij = gpu_J_values[k];
+	    int j = col_idx[k];
+	    float Jij = J_values[k];
 	    sh_mem_spins_Energy[p_Id] +=
 	        Jij * (1.f - current_spin_row * (float)gpuSpins[j]);
 	}
