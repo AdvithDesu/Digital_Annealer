@@ -226,7 +226,7 @@ int main(int argc, char* argv[])
 		};
 
 		int option_index = 0;
-		int ch = getopt_long(argc, argv, "a:l:x:y:s:c:n:m:odeh", long_options, &option_index);
+		int ch = getopt_long(argc, argv, "R:C:V:l:x:y:s:c:n:m:odeh", long_options, &option_index);
 		if (ch == -1) break;
 
 		switch (ch) {
