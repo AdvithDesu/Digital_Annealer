@@ -643,6 +643,26 @@ if(debug)
 	std::cout << "\tbest max cut value: " << gpu_best_max_cut_value[0] << std::endl;
 	// std::cout << "\telapsed time in sec: " << duration * 1e-6 << std::endl;
  
+	// --------------------------------------------------
+	// Free host-pinned memory
+	// --------------------------------------------------
+	cudaFreeHost(gpu_total_energy);
+	cudaFreeHost(gpu_best_energy);
+	
+	cudaFreeHost(gpu_max_cut_value);
+	cudaFreeHost(gpu_best_max_cut_value);
+	
+	cudaFreeHost(gpu_plus_one_spin);
+	cudaFreeHost(gpu_minus_one_spin);
+	
+	cudaFreeHost(gpu_best_plus_one_spin);
+	cudaFreeHost(gpu_best_minus_one_spin);
+	
+	cudaFreeHost(gpu_avg_magnetism);
+	
+	// --------------------------------------------------
+	// Free device memory
+	// --------------------------------------------------
 	cudaFree(gpu_row_ptr);
 	cudaFree(gpu_col_idx);
 	cudaFree(gpu_J_values);
