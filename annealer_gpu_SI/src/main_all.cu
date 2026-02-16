@@ -743,10 +743,6 @@ __global__ void changeInLocalEnePerSpin(const int* row_ptr,
 		atomicAdd(total_energy, local_ham_per_spin);
       	  }
 	}
- 
- __threadfence(); 
-
- __syncthreads();
 
 }
 
