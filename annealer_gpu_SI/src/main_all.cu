@@ -518,9 +518,14 @@ int main(int argc, char* argv[])
 		 gpuErrchk(cudaPeekAtLastError());         		 
  	  }
 
-  energy_history.push_back(gpu_best_energy[0]);
+  	energy_history.push_back(gpu_best_energy[0]);
+    if(debug)
+    {
+        cudaEventDestroy(start);
+        cudaEventDestroy(stop);
+    }
 
-	}
+}
  
 	auto t1 = std::chrono::high_resolution_clock::now();
 
