@@ -144,7 +144,7 @@ static void usage(const char *pname) {
 		"\t\tfix the starting point\n"
 		"\n"
 		"\t-s|--debug \n"
-		"\t\t Print the final lattice value and shows avg magnetization at every temperature\n"
+		"\t\t Print the final lattice value at every temperature\n"
 		"\n"
 		"\t-e|--no-early-stop\n"
 		"\t\tDisable early stopping - run full annealing schedule\n"
@@ -431,10 +431,6 @@ int main(int argc, char* argv[])
 	std::cout << "start annealing with initial energy: " << gpu_best_energy[0] << std::endl;
 	std::vector<double> beta_schedule = create_beta_schedule_geometric(num_temps, start_temp, stop_temp, alpha);
 
-	std::string out_filename = "avgmagnet_" + run_suffix;
-
- 	FILE* fptr = fopen(out_filename.c_str() , "w");
-
 	auto t0 = std::chrono::high_resolution_clock::now();
 	auto annealing_start = std::chrono::high_resolution_clock::now(); 
 
@@ -521,9 +517,6 @@ int main(int argc, char* argv[])
 
 		 gpuErrchk(cudaPeekAtLastError());         		 
  	  }
-          
-  if(debug)
-    fprintf(fptr, "Temperature %.6f magnet %.6f \n", 1.f/beta_schedule.at(i)); 
 
   energy_history.push_back(gpu_best_energy[0]);
 
@@ -550,19 +543,6 @@ int main(int argc, char* argv[])
 	fclose(energy_fptr);
 	// printf("Energy history written to: %s\n", energy_filename.c_str());
 
-	fprintf(fptr, "duration %.3f \n", (duration * 1e-6) );
-	fclose(fptr);
-
- 
- // @R Debugging 
-/*	d_debug_kernel << < 1, 1 >> > (row_ptr, col_idx, J_values,
-		gpu_spins,
-		gpu_spins_1,
-		gpu_num_spins);
-*/   
-
-
-  
   signed char cpu_spins[num_spins];
 
 	gpuErrchk(cudaMemset(d_total_energy, 0, sizeof(float)));
@@ -617,6 +597,7 @@ int main(int argc, char* argv[])
 	cudaFree(gpu_spins_old);
 	cudaFree(gpu_spins_new);
 	cudaFree(d_total_energy);
+	cudaFree(devRanStates);
 	return 0;
 }
 
