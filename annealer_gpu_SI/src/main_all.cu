@@ -106,16 +106,6 @@ __global__ void changeInLocalEnePerSpin(const int* row_ptr, const int* col_idx, 
 	const float beta,
 	float* total_energy,
 	curandState* globalState);
-  
-__global__ void d_avg_magnetism(signed char* gpuSpins, const unsigned int* gpu_num_spins, float* avg_magnetism);
-
-// Initialize lattice spins
-__global__ void preprocess_max_cut_from_ising(const int* row_ptr, const int* col_idx, const float* J_values,
-	signed char* gpuSpins,
-	const unsigned int* gpu_num_spins,
-	float* max_cut_value,
-	int* plus_one_spin,
-	int* minus_one_spin);
 
 std::vector<double> create_beta_schedule_geometric(uint32_t num_sweeps, double temp_start, double temp_end, double alpha);
   
