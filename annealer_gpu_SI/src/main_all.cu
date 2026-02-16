@@ -363,21 +363,6 @@ int main(int argc, char* argv[])
 	unsigned int* gpu_num_spins;
 	gpuErrchk(cudaMalloc((void**)&gpu_num_spins, sizeof(*gpu_num_spins)));
 	gpuErrchk(cudaMemcpy(gpu_num_spins, &num_spins, sizeof(*gpu_num_spins), cudaMemcpyHostToDevice));
-
-	int* gpu_plus_one_spin;
-	cudaHostAlloc(&gpu_plus_one_spin, sizeof(int), 0);
-
-	int* gpu_minus_one_spin;
-	cudaHostAlloc(&gpu_minus_one_spin, sizeof(int), 0);
-
-	int* gpu_best_plus_one_spin;
-	cudaHostAlloc(&gpu_best_plus_one_spin, sizeof(int), 0);
-	gpu_best_plus_one_spin[0] = 0;
-
-	int* gpu_best_minus_one_spin;
-	cudaHostAlloc(&gpu_best_minus_one_spin, sizeof(int), 0);
-	gpu_best_minus_one_spin[0] = 0;
-
 	
 	float* gpu_total_energy;
 	cudaHostAlloc(&gpu_total_energy, sizeof(float), 0);
@@ -387,13 +372,6 @@ int main(int argc, char* argv[])
 
 	float* gpu_best_energy;
 	cudaHostAlloc(&gpu_best_energy, sizeof(float), 0);
-
-	float* gpu_max_cut_value;
-	cudaHostAlloc(&gpu_max_cut_value, sizeof(float), 0);
-
-	float* gpu_best_max_cut_value;
-	cudaHostAlloc(&gpu_best_max_cut_value, sizeof(float), 0);
-	gpu_best_max_cut_value[0] = -1000.f;
  
 	// Setup spin values (DOUBLE BUFFERED)
 	signed char *gpu_spins_old;
@@ -587,9 +565,6 @@ int main(int argc, char* argv[])
   
   signed char cpu_spins[num_spins];
 
-	gpu_max_cut_value[0] = 0.f;
-	gpu_plus_one_spin[0] = 0;
-	gpu_minus_one_spin[0] = 0;
 	gpuErrchk(cudaMemset(d_total_energy, 0, sizeof(float)));
    {
 
@@ -601,27 +576,12 @@ int main(int argc, char* argv[])
                         gpu_num_spins,
                         d_total_energy);
 
-       preprocess_max_cut_from_ising << < num_spins, THREADS >> > (gpu_row_ptr,
-		    	gpu_col_idx,
-		    	gpu_J_values,
-  				gpu_spins_old,
-  				gpu_num_spins,
-  				gpu_max_cut_value,
-  				gpu_plus_one_spin,
-  				gpu_minus_one_spin);
-  
   			cudaDeviceSynchronize();
 
 	   gpuErrchk(cudaMemcpy(gpu_total_energy, d_total_energy, sizeof(float), cudaMemcpyDeviceToHost));
        gpuErrchk(cudaMemcpy(cpu_spins, gpu_spins_old, num_spins * sizeof(signed char), cudaMemcpyDeviceToHost));
-       gpu_max_cut_value[0] *= -0.5f; 
    }     
-        
-			gpu_best_max_cut_value[0] = std::max(gpu_best_max_cut_value[0], gpu_max_cut_value[0]);
-			gpu_best_plus_one_spin[0] = std::max(gpu_best_plus_one_spin[0], gpu_plus_one_spin[0]);
-			gpu_best_minus_one_spin[0] = std::max(gpu_best_minus_one_spin[0], gpu_minus_one_spin[0]);
-			printf("cur engy %.1f curr cut %.1f best cut %.1f with best +1 %d and -1 %d \n", gpu_total_energy[0], gpu_max_cut_value[0], gpu_best_max_cut_value[0], gpu_best_plus_one_spin[0], gpu_best_minus_one_spin[0]);
-
+        			
  if(debug)
  {
 	std::string spins_filename = "spins_" + run_suffix;
@@ -632,31 +592,20 @@ int main(int argc, char* argv[])
         fprintf(fptr1, "%d\t",  (int)cpu_spins[i]);
   }  
   fprintf(fptr1,"\n\n\n");
-  //fprintf(fptr1,"\tbest energy value: %.6f\n", gpu_best_energy[0] );
+  // fprintf(fptr1,"\tbest energy value: %.6f\n", gpu_best_energy[0] );
   fprintf(fptr1,"\ttotal energy value: %.6f\n", gpu_total_energy[0] );
-  fprintf(fptr1,"\tbest max cut value: %.6f\n", gpu_best_max_cut_value[0]);
-	// fprintf(fptr1," \telapsed time in sec: %.6f\n", duration * 1e-6 );
+  // fprintf(fptr1," \t elapsed time in sec: %.6f\n", duration * 1e-6 );
   fclose(fptr1);
   
  }
-	std::cout << "\ttotal energy value: " << gpu_total_energy[0] << std::endl;
-	std::cout << "\tbest max cut value: " << gpu_best_max_cut_value[0] << std::endl;
-	// std::cout << "\telapsed time in sec: " << duration * 1e-6 << std::endl;
+	std::cout << "\t total energy value: " << gpu_total_energy[0] << std::endl;
+	// std::cout << "\t elapsed time in sec: " << duration * 1e-6 << std::endl;
  
 	// --------------------------------------------------
 	// Free host-pinned memory
 	// --------------------------------------------------
 	cudaFreeHost(gpu_total_energy);
 	cudaFreeHost(gpu_best_energy);
-	
-	cudaFreeHost(gpu_max_cut_value);
-	cudaFreeHost(gpu_best_max_cut_value);
-	
-	cudaFreeHost(gpu_plus_one_spin);
-	cudaFreeHost(gpu_minus_one_spin);
-	
-	cudaFreeHost(gpu_best_plus_one_spin);
-	cudaFreeHost(gpu_best_minus_one_spin);
 	
 	// --------------------------------------------------
 	// Free device memory
@@ -877,64 +826,6 @@ __global__ void final_spins_total_energy(const int* row_ptr,
 
 	//        printf("%d total %.1f",blockIdx.x, total_energy);
 }
-
-// Initialize lattice spins
-__global__ void preprocess_max_cut_from_ising(const int* row_ptr,
-    const int* col_idx,
-    const float* J_values,
-	signed char* gpuSpins,
-	const unsigned int* gpu_num_spins,
-	float* max_cut_value,
-	int* plus_one_spin,
-	int* minus_one_spin) {
-
-	unsigned int vertice_Id = blockIdx.x; // actual spin id in this threadBlock
-	unsigned int p_Id = threadIdx.x;// which worker id
-	float current_spin_row = (float)gpuSpins[vertice_Id];
-
-	__shared__ float sh_mem_spins_Energy[THREADS];
-    sh_mem_spins_Energy[p_Id] = 0;
-    __syncthreads();
-
-	// --- Sparse adjacency traversal ---
-	int start = row_ptr[vertice_Id];
-	int end   = row_ptr[vertice_Id + 1];
-	
-	for (int k = start + p_Id; k < end; k += blockDim.x)
-	{
-	    int j = col_idx[k];
-	    float Jij = J_values[k];
-	    sh_mem_spins_Energy[p_Id] +=
-	        Jij * (1.f - current_spin_row * (float)gpuSpins[j]);
-	}
-	__syncthreads();
-
-  for (int off = blockDim.x/2; off; off /= 2) {
-     if (threadIdx.x < off) {
-         sh_mem_spins_Energy[threadIdx.x] += sh_mem_spins_Energy[threadIdx.x + off];
-       }
-   __syncthreads();
-   }
-   
-	if (p_Id == 0)
-	{
-
-		float vertice_energy;
-		// Origial vertice_energy
-		vertice_energy = (0.5f) * sh_mem_spins_Energy[0];
-		// vertice_energy = sh_mem_spins_Energy[0];
-
-		atomicAdd(max_cut_value, vertice_energy);
-
-		if (current_spin_row == 1.f)
-			atomicAdd(plus_one_spin, 1);
-		else
-			atomicAdd(minus_one_spin, 1);
-	}
-
-	//       
-}
-
 
 std::vector<double> create_beta_schedule_geometric(uint32_t num_sweeps, double temp_start, double temp_end, double alpha)
 {
