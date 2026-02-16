@@ -611,7 +611,7 @@ if(debug)
   				gpu_minus_one_spin);
   
   			cudaDeviceSynchronize();
-       gpuErrchk(cudaMemcpy(cpu_spins, gpu_spins_old, num_spins * sizeof(*gpu_spins), cudaMemcpyDeviceToHost));
+       gpuErrchk(cudaMemcpy(cpu_spins, gpu_spins_old, num_spins * sizeof(*gpu_spins_old), cudaMemcpyDeviceToHost));
        gpu_max_cut_value[0] *= -0.5f; 
    }     
         
