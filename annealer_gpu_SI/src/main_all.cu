@@ -25,6 +25,7 @@
 #define BREAK_AFTER_ITERATION 1.0f
 //__constant__ float kd_floats[1000000];
 
+
 // float atomicMin
 __device__ __forceinline__ float mAtomicMin(float *address, float val)
 {
@@ -38,7 +39,7 @@ __device__ __forceinline__ float mAtomicMin(float *address, float val)
 	return __int_as_float(ret);
 }
 
-//
+
 __device__ __forceinline__ float mAtomicMax(float *address, float val)
 {
 	int ret = __float_as_int(*address);
@@ -51,6 +52,7 @@ __device__ __forceinline__ float mAtomicMax(float *address, float val)
 	return __int_as_float(ret);
 }
 
+
 #define gpuErrchk(ans) { gpuAssert((ans), __FILE__, __LINE__); }
 inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort = true)
 {
@@ -60,8 +62,6 @@ inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort =
 		if (abort) exit(code);
 	}
 }
-
-__global__ void d_debug_kernel(const int* row_ptr, const int* col_idx, const float* J_values, signed char* gpu_spins, signed char* gpu_spins_1, const unsigned int* gpu_num_spins);
 
 
 __global__ void init_best_energy(float* total_energy, float* best_energy, bool init = false)
@@ -79,33 +79,47 @@ __global__ void init_best_energy(float* total_energy, float* best_energy, bool i
 }
 
 
-
 // Initialize lattice spins
-__global__ void init_spins_total_energy(const int* row_ptr, const int* col_idx, const float* J_values,
-	float* gpuLinTermsVect,
-	const float* __restrict__ randvals,
-	signed char* gpuSpins,
-	const unsigned int* gpu_num_spins,
-	float* total_energy,
-	curandState * state,
-	unsigned long seed);
+__global__ void init_spins_total_energy(
+		const int* row_ptr, 
+		const int* col_idx, 
+		const float* J_values,
+		float* gpuLinTermsVect,
+		const float* __restrict__ randvals,
+		signed char* gpuSpins,
+		const unsigned int* gpu_num_spins,
+		float* total_energy,
+		curandState * state,
+		unsigned long seed
+);
 
-// fINAL lattice spins
-__global__ void final_spins_total_energy(const int* row_ptr, const int* col_idx, const float* J_values,
-       float* gpuLinTermsVect,
-       signed char* gpuSpins,
-       const unsigned int* gpu_num_spins,
-       float* total_energy);
 
-__global__ void changeInLocalEnePerSpin(const int* row_ptr, const int* col_idx, const float* J_values,
-	float* gpuLinTermsVect,
-	const float* __restrict__ randvals,
-    signed char* gpuLatSpin_old,   // READ ONLY
-    signed char* gpuLatSpin_new,   // WRITE ONLY
-	const unsigned int* gpu_num_spins,
-	const float beta,
-	float* total_energy,
-	curandState* globalState);
+// Final lattice spins
+__global__ void final_spins_total_energy(
+		const int* row_ptr, 
+		const int* col_idx, 
+		const float* J_values,
+		float* gpuLinTermsVect,
+		signed char* gpuSpins,
+		const unsigned int* gpu_num_spins,
+		float* total_energy
+);
+
+
+// Calculate energy difference
+__global__ void changeInLocalEnePerSpin(
+		const int* row_ptr, 
+		const int* col_idx, 
+		const float* J_values,
+		float* gpuLinTermsVect,
+		const float* __restrict__ randvals,
+		signed char* gpuLatSpin_old,   // READ ONLY
+		signed char* gpuLatSpin_new,   // WRITE ONLY
+		const unsigned int* gpu_num_spins,
+		const float beta,
+		float* total_energy,
+		curandState* globalState
+);
 
 std::vector<double> create_beta_schedule_geometric(uint32_t num_sweeps, double temp_start, double temp_end, double alpha);
   
@@ -157,32 +171,30 @@ static void usage(const char *pname) {
 
 int main(int argc, char* argv[])
 {
-
-  // arguments for files required by the CSR representation
-  std::string row_ptr_file = "";
-  std::string col_idx_file = "";
-  std::string values_file  = "";
-
-  std::string linear_file = "";
-
-  float start_temp = 20.f;
-  float stop_temp = 0.001f;
-  float alpha = 0.95f;
-  unsigned long long seed = ((getpid()* rand()) & 0x7FFFFFFFF); //((GetCurrentProcessId()* rand()) & 0x7FFFFFFFF);
-  
-  unsigned int num_temps = 1000; //atoi(argv[2]);
-  unsigned int num_sweeps_per_beta = 1;//atoi(argv[3]);
+	// arguments for files required by the CSR representation
+	std::string row_ptr_file = "";
+	std::string col_idx_file = "";
+	std::string values_file  = "";
 	
-  
-  // bool do_write = false;
-  bool debug = false;
-  bool disable_early_stop = false;
-
-  std::vector<float> energy_history;  // Store best energy at each iteration
-
-  std::cout << "Start parsing the file " << std::endl;
-
-  while (1) {
+	std::string linear_file = "";
+	
+	float start_temp = 20.f;
+	float stop_temp = 0.001f;
+	float alpha = 0.95f;
+	unsigned long long seed = ((getpid()* rand()) & 0x7FFFFFFFF); // ((GetCurrentProcessId()* rand()) & 0x7FFFFFFFF);
+	
+	unsigned int num_temps = 1000; //atoi(argv[2]);
+	unsigned int num_sweeps_per_beta = 1;//atoi(argv[3]);
+	
+	// bool do_write = false;
+	bool debug = false;
+	bool disable_early_stop = false;
+	
+	std::vector<float> energy_history;  // Store best energy at each iteration
+	
+	std::cout << "Start parsing the file " << std::endl;
+	
+	while (1) {
 		static struct option long_options[] = {
 			{ "row_ptr_file", required_argument, 0, 'R' },
 			{ "col_idx_file", required_argument, 0, 'C' },
@@ -247,13 +259,15 @@ int main(int argc, char* argv[])
 		}
 	}
 
-    std::cout << "Running sparse SA with:\n"
-		  << " start temp " << start_temp << " stop temp " << stop_temp << "\n" 
-		  << " seed " << seed << " num temp " << num_temps << " num sweeps " <<  num_sweeps_per_beta << std::endl;
+	std::cout << "Running sparse SA with:\n"
+			<< " start temp " << start_temp << " stop temp " << stop_temp << "\n" 
+			<< " seed " << seed << " num temp " << num_temps << " num sweeps " 
+			<<  num_sweeps_per_beta << std::endl;
 
 	// --------------------------------------------------
 	// Extract run suffix from values_file (e.g. J_values_10403.csv -> 10403)
 	// --------------------------------------------------
+
 	std::string run_suffix;
 	
 	{
@@ -277,8 +291,8 @@ int main(int argc, char* argv[])
 	        run_suffix = base;  // fallback (should not happen)
 	}
 
-	
 	// ---------------- Sparse J loading ----------------
+
 	if (row_ptr_file.empty() || col_idx_file.empty() || values_file.empty()) {
 	    std::cerr << "ERROR: Must provide --row_ptr_file, --col_idx_file, and --values_file\n";
 	    exit(1);
@@ -301,11 +315,11 @@ int main(int argc, char* argv[])
     if(debug)
   	  printtime("ParseData time: ", starttime, endtime);
 
-	unsigned int nnz       = parseSparse.getNNZ();
+	unsigned int nnz = parseSparse.getNNZ();
 	
-	const std::vector<int>&    row_ptr = parseSparse.getRowPtr();
-	const std::vector<int>&    col_idx = parseSparse.getColIdx();
-	const std::vector<float>&  J_values = parseSparse.getValues();
+	const std::vector<int>&row_ptr = parseSparse.getRowPtr();
+	const std::vector<int>&col_idx = parseSparse.getColIdx();
+	const std::vector<float>&J_values = parseSparse.getValues();
 	
 	std::cout << "Sparse J loaded: num_spins = "
 	          << num_spins << ", nnz = " << nnz << std::endl;
@@ -313,7 +327,7 @@ int main(int argc, char* argv[])
     // CPU_THREADS does not seem to be used
 	// unsigned int CPU_THREADS = THREADS;//(num_spins < 32) ? num_spins : 32; 
 
-    //cudaMemcpyToSymbol( &THREADS, &CPU_THREADS, sizeof(unsigned int));
+    // cudaMemcpyToSymbol( &THREADS, &CPU_THREADS, sizeof(unsigned int));
 	// Setup cuRAND generator
 
 	curandGenerator_t rng;
@@ -356,9 +370,8 @@ int main(int argc, char* argv[])
 
 	endtime = rtclock();
    
-  if(debug)
-     printtime("J Matrix data transfer time: ", starttime, endtime);
-	//printVecOfVec(adjMat);
+	if(debug)
+		 printtime("J Matrix data transfer time: ", starttime, endtime);
 
 	unsigned int* gpu_num_spins;
 	gpuErrchk(cudaMalloc((void**)&gpu_num_spins, sizeof(*gpu_num_spins)));
@@ -383,18 +396,16 @@ int main(int argc, char* argv[])
 	std::cout << "initialize spin values " << std::endl;
 	// int blocks = (num_spins + THREADS - 1) / THREADS;
 	curandGenerateUniform(rng, gpu_randvals, num_spins);
-	
-  //d_debug_kernel<<< 1, 1>>>(gpuAdjMat, gpu_adj_mat_size, gpu_num_spins);
 
-// is a seed for random number generator
+	// is a seed for random number generator
 	time_t t;
 	time(&t);
  
-	//  create random states    
+	// create random states    
 	curandState* devRanStates;
 	cudaMalloc(&devRanStates, num_spins * sizeof(curandState));
  	
-   starttime = rtclock();
+   	starttime = rtclock();
 
 	init_spins_total_energy << < num_spins, THREADS >> > (gpu_row_ptr,
     	gpu_col_idx,
@@ -405,25 +416,20 @@ int main(int argc, char* argv[])
 		gpu_num_spins,
 		d_total_energy,
 		devRanStates,
-		(unsigned long)t);
+		(unsigned long)t
+	);
   
-  cudaDeviceSynchronize();
+  	cudaDeviceSynchronize();
 
-	gpuErrchk(cudaMemcpy(gpu_total_energy,
-					 d_total_energy,
-					 sizeof(float),
-					 cudaMemcpyDeviceToHost));
+	gpuErrchk(cudaMemcpy(gpu_total_energy, d_total_energy, sizeof(float), cudaMemcpyDeviceToHost));
+
 	// copy initial spins into new buffer
-	gpuErrchk(cudaMemcpy(gpu_spins_new,
-	                     gpu_spins_old,
-	                     num_spins*sizeof(signed char),
-	                     cudaMemcpyDeviceToDevice));
+	gpuErrchk(cudaMemcpy(gpu_spins_new, gpu_spins_old, num_spins*sizeof(signed char), cudaMemcpyDeviceToDevice));
       
- 	 endtime = rtclock();
+ 	endtime = rtclock();
 
 	printtime("init_spins values and calculate total Energy time: ", starttime, endtime);
  
-
 	gpuErrchk(cudaPeekAtLastError());
 
 	gpu_best_energy[0] = gpu_total_energy[0];
@@ -434,96 +440,96 @@ int main(int argc, char* argv[])
 	auto t0 = std::chrono::high_resolution_clock::now();
 	auto annealing_start = std::chrono::high_resolution_clock::now(); 
 
-// temperature 
-	for (int i = 0; i < beta_schedule.size(); i++)
-	{
-	 int no_update = 0;
-	 cudaEvent_t start, stop;
-	   if(debug)
-	   {   
-	     // @ Debugging
-	     cudaEventCreate(&start);
-	     cudaEventCreate(&stop);
-	    }         
-         
-      for(int ii = 0; ii < num_sweeps_per_beta; ii++)
-	    {   
-        //int prev_energy = gpu_total_energy[0];
+	// Temperature loop
+	for (int i = 0; i < beta_schedule.size(); i++){
 
-        curandGenerateUniform(rng, gpu_randvals, num_spins);
-	   if(debug)
-	   {         
-			cudaEventRecord(start); 
-	   }
-      	changeInLocalEnePerSpin << < num_spins, THREADS >> > (gpu_row_ptr,
-		    	gpu_col_idx,
-		    	gpu_J_values,
-				gpuLinTermsVect,
-      			gpu_randvals,
-			    gpu_spins_old,   // READ
-			    gpu_spins_new,   // WRITE
-      			gpu_num_spins,
-      			beta_schedule.at(i),
-      			d_total_energy,
-      			devRanStates);
-                        
-		if(debug)
-		{
-			 cudaEventRecord(stop);   
-			 cudaEventSynchronize(stop);
-			 float milliseconds = 0;
-			 cudaEventElapsedTime(&milliseconds, start, stop);
-			 printf("Elapse time : %f ms \n", milliseconds);
-		}     
-       cudaDeviceSynchronize();
+		int no_update = 0;
+		cudaEvent_t start, stop;
+		if(debug){   
+			// @ Debugging
+			cudaEventCreate(&start);
+			cudaEventCreate(&stop);
+		}         
+	         
+	    for(int ii = 0; ii < num_sweeps_per_beta; ii++){
 
-		// swap spin buffers (old <-> new)
-		std::swap(gpu_spins_old, gpu_spins_new);
+			//int prev_energy = gpu_total_energy[0];
+	
+	        curandGenerateUniform(rng, gpu_randvals, num_spins);
 
-		gpuErrchk(cudaMemset(d_total_energy, 0, sizeof(float)));
-		
-		final_spins_total_energy<<<num_spins, THREADS>>>(
-		    gpu_row_ptr,
-		    gpu_col_idx,
-		    gpu_J_values,
-		    gpuLinTermsVect,
-		    gpu_spins_old,
-		    gpu_num_spins,
-			d_total_energy);
-		
-		cudaDeviceSynchronize();
+			if(debug){         
+				cudaEventRecord(start); 
+			}
 
-		gpuErrchk(cudaMemcpy(gpu_total_energy, d_total_energy, sizeof(float), cudaMemcpyDeviceToHost));
-       
-       if(gpu_total_energy[0] > gpu_best_energy[0])
-           no_update = 0;
-       
-       gpu_best_energy[0] = std::min(gpu_total_energy[0], gpu_best_energy[0]);
-    	 
-       if ((gpu_best_energy[0] - gpu_total_energy[0]) < CHANGE_MAX_ENERGY)
-  		  	no_update = 0;
-  		 else
-  		  	no_update++;
-  		// printf("cur engy %.1f best engy %.1f \n", gpu_total_energy[0], gpu_best_energy[0]);
+	      	changeInLocalEnePerSpin << < num_spins, THREADS >> > (gpu_row_ptr,
+			    	gpu_col_idx,
+			    	gpu_J_values,
+					gpuLinTermsVect,
+	      			gpu_randvals,
+				    gpu_spins_old,   // READ
+				    gpu_spins_new,   // WRITE
+	      			gpu_num_spins,
+	      			beta_schedule.at(i),
+	      			d_total_energy,
+	      			devRanStates
+			);
+	                        
+			if(debug){
+				cudaEventRecord(stop);   
+				cudaEventSynchronize(stop);
+				float milliseconds = 0;
+				cudaEventElapsedTime(&milliseconds, start, stop);
+				printf("Elapse time : %f ms \n", milliseconds);
+			}     
+	        cudaDeviceSynchronize();
+	
+			// swap spin buffers (old <-> new)
+			std::swap(gpu_spins_old, gpu_spins_new);
+	
+			gpuErrchk(cudaMemset(d_total_energy, 0, sizeof(float)));
+			
+			final_spins_total_energy<<<num_spins, THREADS>>>(
+			    gpu_row_ptr,
+			    gpu_col_idx,
+			    gpu_J_values,
+			    gpuLinTermsVect,
+			    gpu_spins_old,
+			    gpu_num_spins,
+				d_total_energy
+			);
+			
+			cudaDeviceSynchronize();
+	
+			gpuErrchk(cudaMemcpy(gpu_total_energy, d_total_energy, sizeof(float), cudaMemcpyDeviceToHost));
+	       
+	        if(gpu_total_energy[0] > gpu_best_energy[0])
+	            no_update = 0;
+	       
+	        gpu_best_energy[0] = std::min(gpu_total_energy[0], gpu_best_energy[0]);
+	    	 
+	        if ((gpu_best_energy[0] - gpu_total_energy[0]) < CHANGE_MAX_ENERGY)
+	  		  	 no_update = 0;
+	  		else
+	  		  	 no_update++;
 
-		// Only check early stopping if not disabled
-		if (!disable_early_stop && no_update > (BREAK_AFTER_ITERATION) * num_sweeps_per_beta)
-		{
-		    printf("Breaking early at temperature iteration %d due to convergence\n", i);
-		    break;
-		}
-                  	
-         cudaDeviceSynchronize();      
-
-		 gpuErrchk(cudaPeekAtLastError());         		 
- 	  }
-
-  	energy_history.push_back(gpu_best_energy[0]);
-    if(debug)
-    {
-        cudaEventDestroy(start);
-        cudaEventDestroy(stop);
-    }
+	  		// printf("cur engy %.1f best engy %.1f \n", gpu_total_energy[0], gpu_best_energy[0]);
+	
+			// Only check early stopping if not disabled
+			if (!disable_early_stop && no_update > (BREAK_AFTER_ITERATION) * num_sweeps_per_beta){
+			    printf("Breaking early at temperature iteration %d due to convergence\n", i);
+			    break;
+			}
+	                  	
+	        cudaDeviceSynchronize();      
+	
+			gpuErrchk(cudaPeekAtLastError());         		 
+	 	}
+	
+	  	energy_history.push_back(gpu_best_energy[0]);
+	    if(debug){
+	        cudaEventDestroy(start);
+	        cudaEventDestroy(stop);
+	    }
 
 }
  
@@ -537,52 +543,49 @@ int main(int argc, char* argv[])
 
 	// Write energy history to file for plotting
 	std::string energy_filename = "energy_history_" + run_suffix;
-
 	
 	FILE* energy_fptr = fopen(energy_filename.c_str(), "w");
 	fprintf(energy_fptr, "# Iteration\tBest_Energy\n");
-	for (int i = 0; i < energy_history.size(); i++)
-	{
+	for (int i = 0; i < energy_history.size(); i++){
 	    fprintf(energy_fptr, "%d\t%.6f\n", i, energy_history[i]);
 	}
 	fclose(energy_fptr);
 	// printf("Energy history written to: %s\n", energy_filename.c_str());
 
-  signed char cpu_spins[num_spins];
+    signed char cpu_spins[num_spins];
 
 	gpuErrchk(cudaMemset(d_total_energy, 0, sizeof(float)));
-   {
+	{	
+        final_spins_total_energy << < num_spins, THREADS >> > (gpu_row_ptr,
+				gpu_col_idx,
+				gpu_J_values,
+				gpuLinTermsVect,
+				gpu_spins_old,
+				gpu_num_spins,
+				d_total_energy
+		);
 
-       final_spins_total_energy << < num_spins, THREADS >> > (gpu_row_ptr,
-				    	gpu_col_idx,
-				    	gpu_J_values,
-                        gpuLinTermsVect,
-                        gpu_spins_old,
-                        gpu_num_spins,
-                        d_total_energy);
+  		cudaDeviceSynchronize();
 
-  			cudaDeviceSynchronize();
-
-	   gpuErrchk(cudaMemcpy(gpu_total_energy, d_total_energy, sizeof(float), cudaMemcpyDeviceToHost));
-       gpuErrchk(cudaMemcpy(cpu_spins, gpu_spins_old, num_spins * sizeof(signed char), cudaMemcpyDeviceToHost));
-   }     
+	    gpuErrchk(cudaMemcpy(gpu_total_energy, d_total_energy, sizeof(float), cudaMemcpyDeviceToHost));
+        gpuErrchk(cudaMemcpy(cpu_spins, gpu_spins_old, num_spins * sizeof(signed char), cudaMemcpyDeviceToHost));
+	}     
         			
- if(debug)
- {
-	std::string spins_filename = "spins_" + run_suffix;
+	if(debug){
+		std::string spins_filename = "spins_" + run_suffix;
+		
+		FILE* fptr1 = fopen(spins_filename.c_str() , "w");
+		for(int i = 0; i < num_spins; i++){
+			fprintf(fptr1, "%d\t",  (int)cpu_spins[i]);
+		}  
 
- 	FILE* fptr1 = fopen(spins_filename.c_str() , "w");
-  for(int i = 0; i < num_spins; i++)
-  {
-        fprintf(fptr1, "%d\t",  (int)cpu_spins[i]);
-  }  
-  fprintf(fptr1,"\n\n\n");
-  // fprintf(fptr1,"\tbest energy value: %.6f\n", gpu_best_energy[0] );
-  fprintf(fptr1,"\ttotal energy value: %.6f\n", gpu_total_energy[0] );
-  // fprintf(fptr1," \t elapsed time in sec: %.6f\n", duration * 1e-6 );
-  fclose(fptr1);
-  
- }
+		fprintf(fptr1,"\n\n\n");
+		// fprintf(fptr1,"\tbest energy value: %.6f\n", gpu_best_energy[0] );
+		fprintf(fptr1,"\ttotal energy value: %.6f\n", gpu_total_energy[0] );
+		// fprintf(fptr1," \t elapsed time in sec: %.6f\n", duration * 1e-6 );
+		fclose(fptr1);
+	}
+
 	std::cout << "\t total energy value: " << gpu_total_energy[0] << std::endl;
 	// std::cout << "\t elapsed time in sec: " << duration * 1e-6 << std::endl;
  
@@ -607,27 +610,26 @@ int main(int argc, char* argv[])
 }
 
 
-
-
 #define CORRECT 1
 
 #if CORRECT
 
-__global__ void changeInLocalEnePerSpin(const int* row_ptr,
-    const int* col_idx,
-    const float* J_values,
-	float* gpuLinTermsVect,
-	const float* __restrict__ randvals,
-    signed char* gpuLatSpin_old,
-    signed char* gpuLatSpin_new,
-	const unsigned int* gpu_num_spins,
-	const float beta,
-	float* total_energy,
-	curandState* globalState) {
+__global__ void changeInLocalEnePerSpin(
+		const int* row_ptr,
+	    const int* col_idx,
+	    const float* J_values,
+		float* gpuLinTermsVect,
+		const float* __restrict__ randvals,
+	    signed char* gpuLatSpin_old,
+	    signed char* gpuLatSpin_new,
+		const unsigned int* gpu_num_spins,
+		const float beta,
+		float* total_energy,
+		curandState* globalState){
 
 	unsigned int vertice_Id = blockIdx.x;
 	unsigned int p_Id = threadIdx.x;    //32 worker threads 
-	// for each neighour of vertex id pull the gpucurrentupdate[i] and place it in the shared memory
+	// for each neighbour of vertex id pull the gpucurrentupdate[i] and place it in the shared memory
 
 	// shared  spin_v0|spin_v1|.......|J_spin0| J_spin1| J_spin2|..
 	__shared__ float sh_mem_spins_Energy[THREADS];
@@ -655,57 +657,53 @@ __global__ void changeInLocalEnePerSpin(const int* row_ptr,
 	__syncthreads();
 
 
-  for (int off = blockDim.x/2; off; off /= 2) {
-     if (threadIdx.x < off) {
-         sh_mem_spins_Energy[threadIdx.x] += sh_mem_spins_Energy[threadIdx.x + off];
-       }
-   __syncthreads();
-   }
-	
-	if (p_Id == 0)
-	{
-
-	  // default copy (no flip)
-	  gpuLatSpin_new[vertice_Id] = (signed char)current_spin_shared_mem;
-
-	  // Original delta energy expression
-	  // float local_ham_per_spin =  - 2.f * ( (-1.f * sh_mem_spins_Energy[0]) - gpuLinTermsVect[vertice_Id] ) * current_spin_shared_mem;
-	  float local_ham_per_spin =  - 2.f * ( (sh_mem_spins_Energy[0]) + gpuLinTermsVect[vertice_Id] ) * current_spin_shared_mem; //  final energy - current energy
-
-	  float prob_ratio = exp(-1.f * beta * (local_ham_per_spin)); // exp(- (E_f - E_i) / T)
-        
-	  float acceptance_probability = min((float)1.f, prob_ratio);
-
-	  if (randvals[vertice_Id] < acceptance_probability)
-      	  {
-			gpuLatSpin_new[vertice_Id] = (signed char)(-1.f * current_spin_shared_mem); 
-	
-			// atomicAdd(total_energy, local_ham_per_spin);
-      	  }
+	for (int off = blockDim.x/2; off; off /= 2) {
+		if (threadIdx.x < off) {
+		 sh_mem_spins_Energy[threadIdx.x] += sh_mem_spins_Energy[threadIdx.x + off];
+		}
+		__syncthreads();
 	}
-   __syncthreads();
+	
+	if (p_Id == 0){
+		// default copy (no flip)
+		gpuLatSpin_new[vertice_Id] = (signed char)current_spin_shared_mem;
+		
+		// Original delta energy expression
+		// float local_ham_per_spin =  - 2.f * ( (-1.f * sh_mem_spins_Energy[0]) - gpuLinTermsVect[vertice_Id] ) * current_spin_shared_mem;
+		float local_ham_per_spin =  - 2.f * ( (sh_mem_spins_Energy[0]) + gpuLinTermsVect[vertice_Id] ) * current_spin_shared_mem; //  final energy - current energy
+		
+		float prob_ratio = exp(-1.f * beta * (local_ham_per_spin)); // exp(- (E_f - E_i) / T)
+		
+		float acceptance_probability = min((float)1.f, prob_ratio);
+		
+		if (randvals[vertice_Id] < acceptance_probability){
+			gpuLatSpin_new[vertice_Id] = (signed char)(-1.f * current_spin_shared_mem); 
+		
+			// atomicAdd(total_energy, local_ham_per_spin);
+		}
+	}
+	__syncthreads();
 }
-
 
 #endif
 
 // Initialize lattice spins
-__global__ void init_spins_total_energy(const int* row_ptr,
-    const int* col_idx,
-    const float* J_values,
-	float* gpuLinTermsVect,
-	const float* __restrict__ randvals,
-	signed char* gpuSpins,
-	const unsigned int* gpu_num_spins,
-	float* total_energy,
-	curandState * state,
-	unsigned long seed) {
+__global__ void init_spins_total_energy(
+		const int* row_ptr,
+		const int* col_idx,
+		const float* J_values,
+		float* gpuLinTermsVect,
+		const float* __restrict__ randvals,
+		signed char* gpuSpins,
+		const unsigned int* gpu_num_spins,
+		float* total_energy,
+		curandState * state,
+		unsigned long seed){
 
 	unsigned int vertice_Id = blockIdx.x; // actual spin id in this threadBlock
 	unsigned int p_Id = threadIdx.x;// which worker id
 
-	if (p_Id == 0)
-	{
+	if (p_Id == 0){
 		float randval = randvals[vertice_Id];
 		signed char val = (randval < 0.5f) ? -1 : 1;
 		gpuSpins[vertice_Id] = val;// random spin init.
@@ -721,25 +719,22 @@ __global__ void init_spins_total_energy(const int* row_ptr,
 	int start = row_ptr[vertice_Id];
 	int end   = row_ptr[vertice_Id + 1];
 	
-	for (int k = start + p_Id; k < end; k += blockDim.x)
-	{
+	for (int k = start + p_Id; k < end; k += blockDim.x){
 	    int j = col_idx[k];
 	    float Jij = J_values[k];
 	    sh_mem_spins_Energy[p_Id] += Jij * (float)gpuSpins[j];
 	}
 	__syncthreads();
 
+	for (int off = blockDim.x/2; off; off /= 2){
+		if (threadIdx.x < off){
+		 sh_mem_spins_Energy[threadIdx.x] += sh_mem_spins_Energy[threadIdx.x + off];
+		}
+		__syncthreads();
+	}
 
-  for (int off = blockDim.x/2; off; off /= 2) {
-     if (threadIdx.x < off) {
-         sh_mem_spins_Energy[threadIdx.x] += sh_mem_spins_Energy[threadIdx.x + off];
-       }
-   __syncthreads();
-   }
- 
+	if (p_Id == 0){
 
-	if (p_Id == 0)
-	{
  		// Original vertice_energy
 		// float vertice_energy = ((float)gpuSpins[vertice_Id]) * ( sh_mem_spins_Energy[0] - gpuLinTermsVect[vertice_Id] );
 		// float vertice_energy = ((float)gpuSpins[vertice_Id]) * ( sh_mem_spins_Energy[0] + gpuLinTermsVect[vertice_Id] );
@@ -750,24 +745,25 @@ __global__ void init_spins_total_energy(const int* row_ptr,
 		float h_term = -1.0f * current_spin * gpuLinTermsVect[vertice_Id];
 		float vertice_energy = J_term + h_term;
 
-//		printf("vertice_energy  %f \n", vertice_energy);
+		// printf("vertice_energy  %f \n", vertice_energy);
 		atomicAdd(total_energy, vertice_energy);
 	}
 
-	//        printf("%d total %.1f",blockIdx.x, total_energy);
+	// printf("%d total %.1f",blockIdx.x, total_energy);
 }
 
 // fINAL lattice spins
-__global__ void final_spins_total_energy(const int* row_ptr,
-    const int* col_idx,
-    const float* J_values,
-	float* gpuLinTermsVect,
-	signed char* gpuSpins,
-	const unsigned int* gpu_num_spins,
-	float* total_energy) {
+__global__ void final_spins_total_energy(
+		const int* row_ptr,
+	    const int* col_idx,
+	    const float* J_values,
+		float* gpuLinTermsVect,
+		signed char* gpuSpins,
+		const unsigned int* gpu_num_spins,
+		float* total_energy){
 
-	unsigned int vertice_Id = blockIdx.x; // actual spin id in this threadBlock
-	unsigned int p_Id = threadIdx.x;// which worker id
+	unsigned int vertice_Id = blockIdx.x;  // actual spin id in this threadBlock
+	unsigned int p_Id = threadIdx.x;  // which worker id
 
 	__shared__ float sh_mem_spins_Energy[THREADS];
 	sh_mem_spins_Energy[p_Id] = 0;
@@ -777,26 +773,23 @@ __global__ void final_spins_total_energy(const int* row_ptr,
 	int start = row_ptr[vertice_Id];
 	int end   = row_ptr[vertice_Id + 1];
 	
-	for (int k = start + p_Id; k < end; k += blockDim.x)
-	{
+	for (int k = start + p_Id; k < end; k += blockDim.x){
 	    int j = col_idx[k];
 	    float Jij = J_values[k];
 	    sh_mem_spins_Energy[p_Id] += Jij * (float)gpuSpins[j];
 	}
 	__syncthreads();
 
-
-	for (int off = blockDim.x / 2; off; off /= 2) {
-		if (threadIdx.x < off) {
+	for (int off = blockDim.x / 2; off; off /= 2){
+		if (threadIdx.x < off){
 			sh_mem_spins_Energy[threadIdx.x] += sh_mem_spins_Energy[threadIdx.x + off];
 		}
 		__syncthreads();
 	}
 
+	if (p_Id == 0){
 
-	if (p_Id == 0)
-	{
-        	// Original vertice energy
+        // Original vertice energy
 		// float vertice_energy = ((float)gpuSpins[vertice_Id]) * ( sh_mem_spins_Energy[0] - gpuLinTermsVect[vertice_Id] );
 		// float vertice_energy = ((float)gpuSpins[vertice_Id]) * ( sh_mem_spins_Energy[0] + gpuLinTermsVect[vertice_Id] );
 		// hamiltonian_per_spin[vertice_Id] = vertice_energy;// each threadblock updates its own memory location
@@ -809,58 +802,30 @@ __global__ void final_spins_total_energy(const int* row_ptr,
 		//printf("vertice_energy  %d %f \n",vertice_Id, vertice_energy);
 		atomicAdd(total_energy, vertice_energy);
 	}
-
-	//        printf("%d total %.1f",blockIdx.x, total_energy);
+	// printf("%d total %.1f",blockIdx.x, total_energy);
 }
 
-std::vector<double> create_beta_schedule_geometric(uint32_t num_sweeps, double temp_start, double temp_end, double alpha)
-{
+std::vector<double> create_beta_schedule_geometric(
+		uint32_t num_sweeps, 
+		double temp_start, 
+		double temp_end, 
+		double alpha){
+
 	std::vector<double> beta_schedule;
 	double current_temp = temp_start;
 	
 	// Calculate required iterations to reach temp_end (if num_sweeps not specified)
 	num_sweeps = log(temp_end / temp_start) / log(alpha);
 	
-	for (int i = 0; i < num_sweeps; i++)
-	{
+	for (int i = 0; i < num_sweeps; i++){
+
 		beta_schedule.push_back(1.0 / current_temp);
 		current_temp *= alpha;
 		
-		if (current_temp < temp_end) {
+		if (current_temp < temp_end){
 			current_temp = temp_end;  // Floor at minimum temperature
 		}
 	}
-	
+
 	return beta_schedule;
-}
-
-__global__ void d_debug_kernel(const int* row_ptr, const int* col_idx, const float* J_values, signed char* gpu_spins, signed char* gpu_spins_1, const unsigned int* gpu_num_spins)
-{
-	int ones = 0;
-	int ones_1 = 0;
-	for (int i = 0; i < gpu_num_spins[0]; i++)
-	{
-		printf("%d %.1f ", i, (float)gpu_spins[i]);
-		if ((float)gpu_spins[i] == 1.f)
-			ones++;
-		if ((float)gpu_spins_1[i] == -1.f)
-			ones_1++;
-	}
-
-	printf("\n");
-	printf("\n");
-	printf("%d %d \n", ones, ones_1);
-	int m_ones = 0;
-	int m_ones_1 = 0;
-	for (int i = 0; i < gpu_num_spins[0]; i++)
-	{
-		printf("%d %.1f ", i, (float)gpu_spins_1[i]);
-		if ((float)gpu_spins[i] == 1.f)
-			m_ones++;
-		if ((float)gpu_spins_1[i] == -1.f)
-			m_ones_1++;
-	}
-	printf("\n");
-	printf("\n");
-	printf("%d %d\n", m_ones, m_ones_1);
 }
