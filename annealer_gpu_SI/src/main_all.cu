@@ -535,7 +535,7 @@ int main(int argc, char* argv[])
 if(debug)
 {
    {	
-       d_avg_magnetism << < 1, THREADS >> >(gpu_spins, gpu_num_spins, gpu_avg_magnetism);   	
+       d_avg_magnetism << < 1, THREADS >> >(gpu_spins_old, gpu_num_spins, gpu_avg_magnetism);   	
    }
 }     	
          cudaDeviceSynchronize();      
@@ -597,21 +597,21 @@ if(debug)
 				    	gpu_col_idx,
 				    	gpu_J_values,
                         gpuLinTermsVect,
-                        gpu_spins,
+                        gpu_spins_old,
                         gpu_num_spins,
                         gpu_total_energy);
 
        preprocess_max_cut_from_ising << < num_spins, THREADS >> > (gpu_row_ptr,
 		    	gpu_col_idx,
 		    	gpu_J_values,
-  				gpu_spins,
+  				gpu_spins_old,
   				gpu_num_spins,
   				gpu_max_cut_value,
   				gpu_plus_one_spin,
   				gpu_minus_one_spin);
   
   			cudaDeviceSynchronize();
-       gpuErrchk(cudaMemcpy(cpu_spins, gpu_spins, num_spins * sizeof(*gpu_spins), cudaMemcpyDeviceToHost));
+       gpuErrchk(cudaMemcpy(cpu_spins, gpu_spins_old, num_spins * sizeof(*gpu_spins), cudaMemcpyDeviceToHost));
        gpu_max_cut_value[0] *= -0.5f; 
    }     
         
@@ -665,7 +665,8 @@ if(debug)
 	cudaFree(gpu_col_idx);
 	cudaFree(gpu_J_values);
 	cudaFree(gpu_num_spins);
-	cudaFree(gpu_spins);
+	cudaFree(gpu_spins_old);
+	cudaFree(gpu_spins_new);
 	return 0;
 }
 
@@ -681,7 +682,8 @@ __global__ void changeInLocalEnePerSpin(const int* row_ptr,
     const float* J_values,
 	float* gpuLinTermsVect,
 	const float* __restrict__ randvals,
-	signed char* gpuLatSpin,
+    signed char* gpuLatSpin_old,
+    signed char* gpuLatSpin_new,
 	const unsigned int* gpu_num_spins,
 	const float beta,
 	float* total_energy,
