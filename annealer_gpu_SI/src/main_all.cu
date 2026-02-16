@@ -100,7 +100,8 @@ __global__ void final_spins_total_energy(const int* row_ptr, const int* col_idx,
 __global__ void changeInLocalEnePerSpin(const int* row_ptr, const int* col_idx, const float* J_values,
 	float* gpuLinTermsVect,
 	const float* __restrict__ randvals,
-	signed char* gpuLatSpin,
+    signed char* gpuLatSpin_old,   // READ ONLY
+    signed char* gpuLatSpin_new,   // WRITE ONLY
 	const unsigned int* gpu_num_spins,
 	const float beta,
 	float* total_energy,
