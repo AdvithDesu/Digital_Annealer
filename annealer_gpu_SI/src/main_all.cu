@@ -504,7 +504,7 @@ int main(int argc, char* argv[])
 			    gpu_spins_new,   // WRITE
       			gpu_num_spins,
       			beta_schedule.at(i),
-      			gpu_total_energy,
+      			d_total_energy,
       			devRanStates);
                         
 		if(debug)
