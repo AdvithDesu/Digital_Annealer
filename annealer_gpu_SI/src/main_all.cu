@@ -420,9 +420,12 @@ int main(int argc, char* argv[])
 	cudaHostAlloc(&gpu_avg_magnetism, sizeof(*gpu_avg_magnetism), 0);	
 	gpu_avg_magnetism[0] = 0.f;
  
-	// Setup spin values
-	signed char *gpu_spins;
-	gpuErrchk(cudaMalloc((void**)&gpu_spins, num_spins * sizeof(*gpu_spins)));
+	// Setup spin values (DOUBLE BUFFERED)
+	signed char *gpu_spins_old;
+	signed char *gpu_spins_new;
+	
+	gpuErrchk(cudaMalloc((void**)&gpu_spins_old, num_spins * sizeof(signed char)));
+	gpuErrchk(cudaMalloc((void**)&gpu_spins_new, num_spins * sizeof(signed char)));
 
 	std::cout << "initialize spin values " << std::endl;
 	// int blocks = (num_spins + THREADS - 1) / THREADS;
