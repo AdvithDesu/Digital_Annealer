@@ -499,30 +499,34 @@ int main(int argc, char* argv[])
         //int prev_energy = gpu_total_energy[0];
         initSemaphore<<<1, 1>>>();
         curandGenerateUniform(rng, gpu_randvals, num_spins);
-   if(debug)
-   {         
-        cudaEventRecord(start); 
-   }
+	   if(debug)
+	   {         
+			cudaEventRecord(start); 
+	   }
       	changeInLocalEnePerSpin << < num_spins, THREADS >> > (gpu_row_ptr,
 		    	gpu_col_idx,
 		    	gpu_J_values,
 				gpuLinTermsVect,
       			gpu_randvals,
-      			gpu_spins,
+			    gpu_spins_old,   // READ
+			    gpu_spins_new,   // WRITE
       			gpu_num_spins,
       			beta_schedule.at(i),
       			gpu_total_energy,
       			devRanStates);
                         
-    if(debug)
-    {
-         cudaEventRecord(stop);   
-         cudaEventSynchronize(stop);
-         float milliseconds = 0;
-         cudaEventElapsedTime(&milliseconds, start, stop);
-         printf("Elapse time : %f ms \n", milliseconds);
-    }     
+		if(debug)
+		{
+			 cudaEventRecord(stop);   
+			 cudaEventSynchronize(stop);
+			 float milliseconds = 0;
+			 cudaEventElapsedTime(&milliseconds, start, stop);
+			 printf("Elapse time : %f ms \n", milliseconds);
+		}     
        cudaDeviceSynchronize();
+
+		// swap spin buffers (old <-> new)
+		std::swap(gpu_spins_old, gpu_spins_new);
        
        if(gpu_total_energy[0] > gpu_best_energy[0])
            no_update = 0;
