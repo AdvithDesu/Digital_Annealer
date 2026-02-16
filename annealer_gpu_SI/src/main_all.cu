@@ -392,6 +392,9 @@ int main(int argc, char* argv[])
 	float* gpu_total_energy;
 	cudaHostAlloc(&gpu_total_energy, sizeof(float), 0);
 
+	float* d_total_energy;
+	gpuErrchk(cudaMalloc((void**)&d_total_energy, sizeof(float)));
+
 	float* gpu_best_energy;
 	cudaHostAlloc(&gpu_best_energy, sizeof(float), 0);
 
@@ -436,7 +439,7 @@ int main(int argc, char* argv[])
 		gpu_randvals,
 		gpu_spins_old,
 		gpu_num_spins,
-		gpu_total_energy,
+		d_total_energy,
 		devRanStates,
 		(unsigned long)t);
   
@@ -513,7 +516,7 @@ int main(int argc, char* argv[])
 		// swap spin buffers (old <-> new)
 		std::swap(gpu_spins_old, gpu_spins_new);
 
-		gpu_total_energy[0] = 0.f;
+		gpuErrchk(cudaMemset(d_total_energy, 0, sizeof(float)));
 		
 		final_spins_total_energy<<<num_spins, THREADS>>>(
 		    gpu_row_ptr,
@@ -522,9 +525,11 @@ int main(int argc, char* argv[])
 		    gpuLinTermsVect,
 		    gpu_spins_old,
 		    gpu_num_spins,
-		    gpu_total_energy);
+			d_total_energy);
 		
 		cudaDeviceSynchronize();
+
+		gpuErrchk(cudaMemcpy(gpu_total_energy, d_total_energy, sizeof(float), cudaMemcpyDeviceToHost));
        
        if(gpu_total_energy[0] > gpu_best_energy[0])
            no_update = 0;
@@ -602,8 +607,7 @@ if(debug)
 	gpu_max_cut_value[0] = 0.f;
 	gpu_plus_one_spin[0] = 0;
 	gpu_minus_one_spin[0] = 0;
-  gpu_total_energy[0] = 0.f;
-
+	gpuErrchk(cudaMemset(d_total_energy, 0, sizeof(float)));
    {
 
        final_spins_total_energy << < num_spins, THREADS >> > (gpu_row_ptr,
@@ -612,7 +616,7 @@ if(debug)
                         gpuLinTermsVect,
                         gpu_spins_old,
                         gpu_num_spins,
-                        gpu_total_energy);
+                        d_total_energy);
 
        preprocess_max_cut_from_ising << < num_spins, THREADS >> > (gpu_row_ptr,
 		    	gpu_col_idx,
@@ -624,6 +628,8 @@ if(debug)
   				gpu_minus_one_spin);
   
   			cudaDeviceSynchronize();
+
+	   gpuErrchk(cudaMemcpy(gpu_total_energy, d_total_energy, sizeof(float), cudaMemcpyDeviceToHost));
        gpuErrchk(cudaMemcpy(cpu_spins, gpu_spins_old, num_spins * sizeof(signed char), cudaMemcpyDeviceToHost));
        gpu_max_cut_value[0] *= -0.5f; 
    }     
@@ -680,6 +686,7 @@ if(debug)
 	cudaFree(gpu_num_spins);
 	cudaFree(gpu_spins_old);
 	cudaFree(gpu_spins_new);
+	cudaFree(d_total_energy);
 	return 0;
 }
 
