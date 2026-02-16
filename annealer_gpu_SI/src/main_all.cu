@@ -448,13 +448,19 @@ int main(int argc, char* argv[])
     	gpu_J_values,
 		gpuLinTermsVect,
 		gpu_randvals,
-		gpu_spins,
+		gpu_spins_old,
 		gpu_num_spins,
 		gpu_total_energy,
 		devRanStates,
 		(unsigned long)t);
   
   cudaDeviceSynchronize();
+
+	// copy initial spins into new buffer
+	gpuErrchk(cudaMemcpy(gpu_spins_new,
+	                     gpu_spins_old,
+	                     num_spins*sizeof(signed char),
+	                     cudaMemcpyDeviceToDevice));
       
  	 endtime = rtclock();
 
