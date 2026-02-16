@@ -698,7 +698,7 @@ __global__ void changeInLocalEnePerSpin(const int* row_ptr,
 
 	float current_spin_shared_mem;
 
-	current_spin_shared_mem = (float)gpuLatSpin[vertice_Id];
+	current_spin_shared_mem = (float)gpuLatSpin_old[vertice_Id];
 
 	// --- Sparse adjacency traversal ---
 	// For vertex vertice_Id, neighbors are in
@@ -712,7 +712,7 @@ __global__ void changeInLocalEnePerSpin(const int* row_ptr,
 	{
 	    int j = col_idx[k];                // neighbor index
 	    float Jij = J_values[k];           // coupling value
-	    sh_mem_spins_Energy[p_Id] += Jij * (float)gpuLatSpin[j];
+	    sh_mem_spins_Energy[p_Id] += Jij * (float)gpuLatSpin_old[j];
 	}
 	__syncthreads();
 
