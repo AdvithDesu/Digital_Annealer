@@ -512,6 +512,19 @@ int main(int argc, char* argv[])
 
 		// swap spin buffers (old <-> new)
 		std::swap(gpu_spins_old, gpu_spins_new);
+
+		gpu_total_energy[0] = 0.f;
+		
+		final_spins_total_energy<<<num_spins, THREADS>>>(
+		    gpu_row_ptr,
+		    gpu_col_idx,
+		    gpu_J_values,
+		    gpuLinTermsVect,
+		    gpu_spins_old,
+		    gpu_num_spins,
+		    gpu_total_energy);
+		
+		cudaDeviceSynchronize();
        
        if(gpu_total_energy[0] > gpu_best_energy[0])
            no_update = 0;
@@ -611,7 +624,7 @@ if(debug)
   				gpu_minus_one_spin);
   
   			cudaDeviceSynchronize();
-       gpuErrchk(cudaMemcpy(cpu_spins, gpu_spins_old, num_spins * sizeof(*gpu_spins_old), cudaMemcpyDeviceToHost));
+       gpuErrchk(cudaMemcpy(cpu_spins, gpu_spins_old, num_spins * sizeof(signed char), cudaMemcpyDeviceToHost));
        gpu_max_cut_value[0] *= -0.5f; 
    }     
         
@@ -746,7 +759,7 @@ __global__ void changeInLocalEnePerSpin(const int* row_ptr,
       	  {
 			gpuLatSpin_new[vertice_Id] = (signed char)(-1.f * current_spin_shared_mem); 
 	
-			atomicAdd(total_energy, local_ham_per_spin);
+			// atomicAdd(total_energy, local_ham_per_spin);
       	  }
 	}
    __syncthreads();
