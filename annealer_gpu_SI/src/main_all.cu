@@ -118,21 +118,6 @@ __global__ void preprocess_max_cut_from_ising(const int* row_ptr, const int* col
 	int* minus_one_spin);
 
 std::vector<double> create_beta_schedule_geometric(uint32_t num_sweeps, double temp_start, double temp_end, double alpha);
-
-__device__ volatile int sem = 0;
-
-__global__ void initSemaphore() {
-	sem = 0;
-}
-
-__device__ void acquire_semaphore(volatile int *lock){
-  while (atomicCAS((int *)lock, 0, 1) != 0);
-}
-
-__device__ void release_semaphore(volatile int *lock){
-  *lock = 0;
-  __threadfence();
-}
   
 static void usage(const char *pname) {
 
@@ -487,18 +472,17 @@ int main(int argc, char* argv[])
 	{
 	 int no_update = 0;
 	 cudaEvent_t start, stop;
-   if(debug)
-   {   
-     // @ Debugging
-     
-     cudaEventCreate(&start);
-     cudaEventCreate(&stop);
-    }         
+	   if(debug)
+	   {   
+	     // @ Debugging
+	     cudaEventCreate(&start);
+	     cudaEventCreate(&stop);
+	    }         
          
       for(int ii = 0; ii < num_sweeps_per_beta; ii++)
 	    {   
         //int prev_energy = gpu_total_energy[0];
-        initSemaphore<<<1, 1>>>();
+
         curandGenerateUniform(rng, gpu_randvals, num_spins);
 	   if(debug)
 	   {         
@@ -707,11 +691,6 @@ __global__ void changeInLocalEnePerSpin(const int* row_ptr,
 	unsigned int p_Id = threadIdx.x;    //32 worker threads 
 	// for each neighour of vertex id pull the gpucurrentupdate[i] and place it in the shared memory
 
-  __syncthreads();
-  if (threadIdx.x == 0)
-     acquire_semaphore(&sem);
-  __syncthreads();
-
 	// shared  spin_v0|spin_v1|.......|J_spin0| J_spin1| J_spin2|..
 	__shared__ float sh_mem_spins_Energy[THREADS];
     sh_mem_spins_Energy[p_Id] = 0;
@@ -766,9 +745,7 @@ __global__ void changeInLocalEnePerSpin(const int* row_ptr,
 	}
  
  __threadfence(); 
- __syncthreads();
- if (threadIdx.x == 0)
-   release_semaphore(&sem);
+
  __syncthreads();
 
 }
