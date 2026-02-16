@@ -394,10 +394,6 @@ int main(int argc, char* argv[])
 	float* gpu_best_max_cut_value;
 	cudaHostAlloc(&gpu_best_max_cut_value, sizeof(float), 0);
 	gpu_best_max_cut_value[0] = -1000.f;
-
-	float* gpu_avg_magnetism;	
-	cudaHostAlloc(&gpu_avg_magnetism, sizeof(*gpu_avg_magnetism), 0);	
-	gpu_avg_magnetism[0] = 0.f;
  
 	// Setup spin values (DOUBLE BUFFERED)
 	signed char *gpu_spins_old;
@@ -542,21 +538,14 @@ int main(int argc, char* argv[])
 		    printf("Breaking early at temperature iteration %d due to convergence\n", i);
 		    break;
 		}
-              
-// @R Debugging
-if(debug)
-{
-   {	
-       d_avg_magnetism << < 1, THREADS >> >(gpu_spins_old, gpu_num_spins, gpu_avg_magnetism);   	
-   }
-}     	
+                  	
          cudaDeviceSynchronize();      
 
 		 gpuErrchk(cudaPeekAtLastError());         		 
  	  }
           
   if(debug)
-    fprintf(fptr, "Temperature %.6f magnet %.6f \n", 1.f/beta_schedule.at(i),  gpu_avg_magnetism[0]); 
+    fprintf(fptr, "Temperature %.6f magnet %.6f \n", 1.f/beta_schedule.at(i)); 
 
   energy_history.push_back(gpu_best_energy[0]);
 
@@ -668,8 +657,6 @@ if(debug)
 	
 	cudaFreeHost(gpu_best_plus_one_spin);
 	cudaFreeHost(gpu_best_minus_one_spin);
-	
-	cudaFreeHost(gpu_avg_magnetism);
 	
 	// --------------------------------------------------
 	// Free device memory
@@ -999,38 +986,4 @@ __global__ void d_debug_kernel(const int* row_ptr, const int* col_idx, const flo
 	printf("\n");
 	printf("\n");
 	printf("%d %d\n", m_ones, m_ones_1);
-}
-
-__global__ void d_avg_magnetism(signed char* gpuSpins, const unsigned int* gpu_num_spins, float* avg_magnetism)	
-{	
-  unsigned int p_Id = threadIdx.x;	
-  	
-	__shared__ float sh_mem_spins_Energy[THREADS];	
-  sh_mem_spins_Energy[p_Id] = 0;	
-  __syncthreads();	
-
-    // num_iter does not seem to be used here
- 	// int num_iter = (gpu_num_spins[0] + THREADS - 1) / THREADS;
-   	 	
-	for (int i = 0; i < gpu_num_spins[0]; i++)	
-	{	
-		// p_Id (worker group)	
-		if (p_Id + i * THREADS < gpu_num_spins[0])	
-		{		
-			sh_mem_spins_Energy[p_Id] += ((float)gpuSpins[p_Id + i * THREADS]); 	
-		}	
-	}	
-	__syncthreads();	
- 	
-   for (int off = blockDim.x/2; off; off /= 2) {	
-     if (threadIdx.x < off) {	
-         sh_mem_spins_Energy[threadIdx.x] += sh_mem_spins_Energy[threadIdx.x + off];	
-       }	
-   __syncthreads();	
-   }	
-   	
-	if (p_Id == 0)	
-	{	
-      avg_magnetism[0] = sh_mem_spins_Energy[0]/gpu_num_spins[0];		
-  }	
 }
