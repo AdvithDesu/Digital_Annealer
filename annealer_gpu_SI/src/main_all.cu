@@ -693,6 +693,8 @@ __global__ void changeInLocalEnePerSpin(const int* row_ptr,
 	unsigned int p_Id = threadIdx.x;    //32 worker threads 
 	// for each neighour of vertex id pull the gpucurrentupdate[i] and place it in the shared memory
 
+    if (vertice_Id >= *gpu_num_spins) return;
+
 	// shared  spin_v0|spin_v1|.......|J_spin0| J_spin1| J_spin2|..
 	__shared__ float sh_mem_spins_Energy[THREADS];
     sh_mem_spins_Energy[p_Id] = 0;
@@ -725,8 +727,6 @@ __global__ void changeInLocalEnePerSpin(const int* row_ptr,
        }
    __syncthreads();
    }
-   
-  __syncthreads();
 	
 	if (p_Id == 0)
 	{
@@ -749,7 +749,7 @@ __global__ void changeInLocalEnePerSpin(const int* row_ptr,
 			atomicAdd(total_energy, local_ham_per_spin);
       	  }
 	}
-
+   __syncthreads();
 }
 
 
