@@ -597,6 +597,8 @@ int main(int argc, char* argv[])
 	cudaFree(gpu_spins_old);
 	cudaFree(d_total_energy);
 	cudaFree(devRanStates);
+	cudaFree(gpu_candidates);
+	cudaFree(gpu_num_candidates);
 	return 0;
 }
 
