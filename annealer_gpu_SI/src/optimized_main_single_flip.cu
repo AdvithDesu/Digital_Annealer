@@ -619,75 +619,50 @@ int main(int argc, char* argv[])
 
 #if CORRECT
 
-__global__ void changeInLocalEnePerSpin(
-		const int* row_ptr,
-	    const int* col_idx,
-	    const float* J_values,
-		float* gpuLinTermsVect,
-		const float* __restrict__ randvals,
-	    signed char* gpuLatSpin_old,
-	    signed char* gpuLatSpin_new,
-		const unsigned int* gpu_num_spins,
-		const float beta,
-		float* total_energy,
-		curandState* globalState){
+__global__ void collectFlipCandidates(
+        const int*   row_ptr,
+        const int*   col_idx,
+        const float* J_values,
+        float*       gpuLinTermsVect,
+        const float* __restrict__ randvals,
+        signed char* gpuLatSpin,          // single buffer now (read-only here)
+        const unsigned int* gpu_num_spins,
+        const float  beta,
+        FlipCandidate* candidates,        // output: accepted candidates
+        int*           num_candidates     // output: atomic counter
+){
+    unsigned int vertice_Id = blockIdx.x;
+    unsigned int p_Id       = threadIdx.x;
 
-	unsigned int vertice_Id = blockIdx.x;
-	unsigned int p_Id = threadIdx.x;    //32 worker threads 
-	// for each neighbour of vertex id pull the gpucurrentupdate[i] and place it in the shared memory
-
-	// shared  spin_v0|spin_v1|.......|J_spin0| J_spin1| J_spin2|..
-	__shared__ float sh_mem_spins_Energy[THREADS];
-    sh_mem_spins_Energy[p_Id] = 0;
+    __shared__ float sh_mem[THREADS];
+    sh_mem[p_Id] = 0.0f;
     __syncthreads();
 
-	float current_spin_shared_mem;
+    float current_spin = (float)gpuLatSpin[vertice_Id];
 
-	current_spin_shared_mem = (float)gpuLatSpin_old[vertice_Id];
+    int start = row_ptr[vertice_Id];
+    int end   = row_ptr[vertice_Id + 1];
 
-	// --- Sparse adjacency traversal ---
-	// For vertex vertice_Id, neighbors are in
-	// [row_ptr[vertice_Id], row_ptr[vertice_Id + 1])
-	
-	int start = row_ptr[vertice_Id];
-	int end   = row_ptr[vertice_Id + 1];
-	
-	// Each thread accumulates over a strided subset of neighbors
-	for (int k = start + p_Id; k < end; k += blockDim.x)
-	{
-	    int j = col_idx[k];                // neighbor index
-	    float Jij = J_values[k];           // coupling value
-	    sh_mem_spins_Energy[p_Id] += Jij * (float)gpuLatSpin_old[j];
-	}
-	__syncthreads();
+    for (int k = start + p_Id; k < end; k += blockDim.x)
+        sh_mem[p_Id] += J_values[k] * (float)gpuLatSpin[col_idx[k]];
+    __syncthreads();
 
+    for (int off = blockDim.x / 2; off; off /= 2) {
+        if (p_Id < off) sh_mem[p_Id] += sh_mem[p_Id + off];
+        __syncthreads();
+    }
 
-	for (int off = blockDim.x/2; off; off /= 2) {
-		if (threadIdx.x < off) {
-		 sh_mem_spins_Energy[threadIdx.x] += sh_mem_spins_Energy[threadIdx.x + off];
-		}
-		__syncthreads();
-	}
-	
-	if (p_Id == 0){
-		// default copy (no flip)
-		gpuLatSpin_new[vertice_Id] = (signed char)current_spin_shared_mem;
-		
-		// Original delta energy expression
-		// float local_ham_per_spin =  - 2.f * ( (-1.f * sh_mem_spins_Energy[0]) - gpuLinTermsVect[vertice_Id] ) * current_spin_shared_mem;
-		float local_ham_per_spin =  - 2.f * ( (sh_mem_spins_Energy[0]) + gpuLinTermsVect[vertice_Id] ) * current_spin_shared_mem; //  final energy - current energy
-		
-		float prob_ratio = exp(-1.f * beta * (local_ham_per_spin)); // exp(- (E_f - E_i) / T)
-		
-		float acceptance_probability = min((float)1.f, prob_ratio);
-		
-		if (randvals[vertice_Id] < acceptance_probability){
-			gpuLatSpin_new[vertice_Id] = (signed char)(-1.f * current_spin_shared_mem); 
-		
-			// atomicAdd(total_energy, local_ham_per_spin);
-		}
-	}
-	__syncthreads();
+    if (p_Id == 0) {
+        float dE = -2.0f * (sh_mem[0] + gpuLinTermsVect[vertice_Id]) * current_spin;
+
+        float acceptance = fminf(1.0f, expf(-beta * dE));
+
+        if (randvals[vertice_Id] < acceptance) {
+            int idx = atomicAdd(num_candidates, 1);
+            candidates[idx].spin_id      = vertice_Id;
+            candidates[idx].delta_energy = dE;
+        }
+    }
 }
 
 #endif
