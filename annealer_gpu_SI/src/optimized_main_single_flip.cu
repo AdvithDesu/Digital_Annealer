@@ -110,20 +110,17 @@ __global__ void final_spins_total_energy(
 		float* total_energy
 );
 
-
-// Calculate energy difference
-__global__ void changeInLocalEnePerSpin(
-		const int* row_ptr, 
-		const int* col_idx, 
-		const float* J_values,
-		float* gpuLinTermsVect,
-		const float* __restrict__ randvals,
-		signed char* gpuLatSpin_old,   // READ ONLY
-		signed char* gpuLatSpin_new,   // WRITE ONLY
-		const unsigned int* gpu_num_spins,
-		const float beta,
-		float* total_energy,
-		curandState* globalState
+__global__ void collectFlipCandidates(
+        const int*   row_ptr,
+        const int*   col_idx,
+        const float* J_values,
+        float*       gpuLinTermsVect,
+        const float* __restrict__ randvals,
+        signed char* gpuLatSpin,          // single buffer now (read-only here)
+        const unsigned int* gpu_num_spins,
+        const float  beta,
+        FlipCandidate* candidates,        // output: accepted candidates
+        int*           num_candidates     // output: atomic counter
 );
 
 std::vector<double> create_beta_schedule_geometric(uint32_t num_sweeps, double temp_start, double temp_end, double alpha);
@@ -459,86 +456,71 @@ int main(int argc, char* argv[])
 			cudaEventCreate(&stop);
 		}         
 	         
-	    for(int ii = 0; ii < num_sweeps_per_beta; ii++){
-
-			//int prev_energy = gpu_total_energy[0];
-	
-	        curandGenerateUniform(rng, gpu_randvals, num_spins);
-
-			if(debug){         
-				cudaEventRecord(start); 
-			}
-
-	      	changeInLocalEnePerSpin << < num_spins, THREADS >> > (gpu_row_ptr,
-			    	gpu_col_idx,
-			    	gpu_J_values,
-					gpuLinTermsVect,
-	      			gpu_randvals,
-				    gpu_spins_old,   // READ
-				    gpu_spins_new,   // WRITE
-	      			gpu_num_spins,
-	      			beta_schedule.at(i),
-	      			d_total_energy,
-	      			devRanStates
-			);
-	                        
-			if(debug){
-				cudaEventRecord(stop);   
-				cudaEventSynchronize(stop);
-				float milliseconds = 0;
-				cudaEventElapsedTime(&milliseconds, start, stop);
-				printf("Elapse time : %f ms \n", milliseconds);
-			}     
-	        cudaDeviceSynchronize();
-	
-			// swap spin buffers (old <-> new)
-			std::swap(gpu_spins_old, gpu_spins_new);
-	
-			gpuErrchk(cudaMemset(d_total_energy, 0, sizeof(float)));
-			
-			final_spins_total_energy<<<num_spins, THREADS>>>(
-			    gpu_row_ptr,
-			    gpu_col_idx,
-			    gpu_J_values,
-			    gpuLinTermsVect,
-			    gpu_spins_old,
-			    gpu_num_spins,
-				d_total_energy
-			);
-			
-			cudaDeviceSynchronize();
-	
-			gpuErrchk(cudaMemcpy(gpu_total_energy, d_total_energy, sizeof(float), cudaMemcpyDeviceToHost));
-	       
-	        if(gpu_total_energy[0] > gpu_best_energy[0])
-	            no_update = 0;
-	       
-	        gpu_best_energy[0] = std::min(gpu_total_energy[0], gpu_best_energy[0]);
-	    	 
-	        if ((gpu_best_energy[0] - gpu_total_energy[0]) < CHANGE_MAX_ENERGY)
-	  		  	 no_update = 0;
-	  		else
-	  		  	 no_update++;
-
-	  		// printf("cur engy %.1f best engy %.1f \n", gpu_total_energy[0], gpu_best_energy[0]);
-	
-			// Only check early stopping if not disabled
-			if (!disable_early_stop && no_update > (BREAK_AFTER_ITERATION) * num_sweeps_per_beta){
-			    printf("Breaking early at temperature iteration %d due to convergence\n", i);
-			    break;
-			}
-	                  	
-	        cudaDeviceSynchronize();      
-	
-			gpuErrchk(cudaPeekAtLastError());         		 
-	 	}
+		for (int ii = 0; ii < num_sweeps_per_beta; ii++) {
+		
+		    // 1. Generate fresh random values for Metropolis acceptance test
+		    curandGenerateUniform(rng, gpu_randvals, num_spins);
+		
+		    // 2. Reset candidate counter
+		    gpuErrchk(cudaMemset(gpu_num_candidates, 0, sizeof(int)));
+		
+		    // 3. Every spin evaluates its dE and votes; accepted ones enter candidates[]
+		    collectFlipCandidates<<<num_spins, THREADS>>>(
+		        gpu_row_ptr,
+		        gpu_col_idx,
+		        gpu_J_values,
+		        gpuLinTermsVect,
+		        gpu_randvals,
+		        gpu_spins_old,
+		        gpu_num_spins,
+		        (float)beta_schedule[i],
+		        gpu_candidates,
+		        gpu_num_candidates
+		    );
+		    cudaDeviceSynchronize();
+		
+		    // 4. Read candidate count back to host
+		    int h_num_candidates = 0;
+		    gpuErrchk(cudaMemcpy(&h_num_candidates, gpu_num_candidates, sizeof(int), cudaMemcpyDeviceToHost));
+		
+		    if (h_num_candidates > 0) {
+		
+		        // 5. Pick one candidate uniformly at random on the host
+		        int chosen = (int)(((double)rand() / RAND_MAX) * h_num_candidates);
+		        if (chosen >= h_num_candidates) chosen = h_num_candidates - 1;
+		
+		        // 6. Apply that single flip and update running energy via atomicAdd
+		        applySingleFlip<<<1, 1>>>(
+		            gpu_spins_old,
+		            d_total_energy,
+		            gpu_candidates,
+		            chosen
+		        );
+		        cudaDeviceSynchronize();
+		
+		        // 7. Read updated energy
+		        gpuErrchk(cudaMemcpy(gpu_total_energy, d_total_energy, sizeof(float), cudaMemcpyDeviceToHost));
+		
+		        gpu_best_energy[0] = std::min(gpu_total_energy[0], gpu_best_energy[0]);
+		
+		        // 8. Early stopping
+		        if ((gpu_best_energy[0] - gpu_total_energy[0]) < CHANGE_MAX_ENERGY)
+		            no_update = 0;
+		        else
+		            no_update++;
+		
+		        if (!disable_early_stop && no_update > (int)(BREAK_AFTER_ITERATION * num_sweeps_per_beta)) {
+		            printf("Breaking early at temperature iteration %d\n", i);
+		            break;
+		        }
+		    }
+		}
 	
 	  	energy_history.push_back(gpu_best_energy[0]);
 	    if(debug){
 	        cudaEventDestroy(start);
 	        cudaEventDestroy(stop);
 	    }
-
 }
  
 	auto t1 = std::chrono::high_resolution_clock::now();
@@ -611,7 +593,6 @@ int main(int argc, char* argv[])
 	cudaFree(gpu_J_values);
 	cudaFree(gpu_num_spins);
 	cudaFree(gpu_spins_old);
-	cudaFree(gpu_spins_new);
 	cudaFree(d_total_energy);
 	cudaFree(devRanStates);
 	return 0;
