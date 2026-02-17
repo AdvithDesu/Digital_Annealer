@@ -19,6 +19,11 @@
 #define BREAK_UPDATE_VAL 2//1000 
 #define TCRIT 2.26918531421f
 
+struct FlipCandidate {
+    int    spin_id;
+    float  delta_energy;
+};
+
 #include "utils.hpp"
 
 #define CHANGE_MAX_ENERGY 0.0f
