@@ -591,6 +591,7 @@ int main(int argc, char* argv[])
 	}
 
 	std::cout << "\t total energy value: " << gpu_total_energy[0] << std::endl;
+	printf("best engy %.1f \n", gpu_best_energy[0]);
 	// std::cout << "\t elapsed time in sec: " << duration * 1e-6 << std::endl;
  
 	// --------------------------------------------------
