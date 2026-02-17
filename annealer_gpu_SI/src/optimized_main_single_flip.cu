@@ -523,9 +523,12 @@ int main(int argc, char* argv[])
 		            break;
 		        }
 		    }
+			// Always sync energy to host at end of each sweep regardless of whether a flip occurred
+			gpuErrchk(cudaMemcpy(gpu_total_energy, d_total_energy, sizeof(float), cudaMemcpyDeviceToHost));
 		}
-	
-	  	energy_history.push_back(gpu_best_energy[0]);
+		gpuErrchk(cudaMemcpy(gpu_total_energy, d_total_energy, sizeof(float), cudaMemcpyDeviceToHost));
+		gpu_best_energy[0] = std::min(gpu_total_energy[0], gpu_best_energy[0]);
+		energy_history.push_back(gpu_best_energy[0]);
 	    if(debug){
 	        cudaEventDestroy(start);
 	        cudaEventDestroy(stop);
