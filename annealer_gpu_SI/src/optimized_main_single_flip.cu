@@ -419,6 +419,8 @@ int main(int argc, char* argv[])
  	
    	starttime = rtclock();
 
+	gpuErrchk(cudaMemset(d_total_energy, 0, sizeof(float)));
+
 	init_spins_total_energy << < num_spins, THREADS >> > (gpu_row_ptr,
     	gpu_col_idx,
     	gpu_J_values,
