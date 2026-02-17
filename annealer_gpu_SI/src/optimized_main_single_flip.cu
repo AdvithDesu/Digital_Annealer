@@ -737,8 +737,8 @@ __global__ void init_spins_total_energy(
 		// hamiltonian_per_spin[vertice_Id] = vertice_energy;// each threadblock updates its own memory location
 
 		float current_spin = (float)gpuSpins[vertice_Id];
-		float J_term = -0.5f * current_spin * sh_mem_spins_Energy[0];
-		float h_term = -1.0f * current_spin * gpuLinTermsVect[vertice_Id];
+		float J_term = 0.5f * current_spin * sh_mem_spins_Energy[0];
+		float h_term = current_spin * gpuLinTermsVect[vertice_Id];
 		float vertice_energy = J_term + h_term;
 
 		// printf("vertice_energy  %f \n", vertice_energy);
@@ -791,8 +791,8 @@ __global__ void final_spins_total_energy(
 		// hamiltonian_per_spin[vertice_Id] = vertice_energy;// each threadblock updates its own memory location
 
 		float current_spin = (float)gpuSpins[vertice_Id];
-		float J_term = -0.5f * current_spin * sh_mem_spins_Energy[0];
-		float h_term = -1.0f * current_spin * gpuLinTermsVect[vertice_Id];
+		float J_term = 0.5f * current_spin * sh_mem_spins_Energy[0];
+		float h_term = current_spin * gpuLinTermsVect[vertice_Id];
 		float vertice_energy = J_term + h_term;
 
 		//printf("vertice_energy  %d %f \n",vertice_Id, vertice_energy);
