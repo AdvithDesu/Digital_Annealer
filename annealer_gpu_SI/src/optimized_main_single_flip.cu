@@ -123,6 +123,13 @@ __global__ void collectFlipCandidates(
         int*           num_candidates     // output: atomic counter
 );
 
+__global__ void applySingleFlip(
+        signed char*   gpuLatSpin,
+        float*         d_total_energy,
+        FlipCandidate* candidates,
+        int            chosen_idx
+);
+
 std::vector<double> create_beta_schedule_geometric(uint32_t num_sweeps, double temp_start, double temp_end, double alpha);
   
 static void usage(const char *pname) {
