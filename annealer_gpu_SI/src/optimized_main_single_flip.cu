@@ -436,6 +436,11 @@ int main(int argc, char* argv[])
 
 	gpu_best_energy[0] = gpu_total_energy[0];
 
+	// d_total_energy already holds the correct initial value from init_spins_total_energy.
+	// No reset needed here — applySingleFlip will atomicAdd dE onto it incrementally.
+	// We just confirm the device value is in sync before the loop starts.
+	gpuErrchk(cudaMemcpy(d_total_energy, gpu_total_energy, sizeof(float), cudaMemcpyHostToDevice));
+
 	std::cout << "start annealing with initial energy: " << gpu_best_energy[0] << std::endl;
 	std::vector<double> beta_schedule = create_beta_schedule_geometric(num_temps, start_temp, stop_temp, alpha);
 
