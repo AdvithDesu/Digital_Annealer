@@ -391,12 +391,15 @@ int main(int argc, char* argv[])
 	float* gpu_best_energy;
 	cudaHostAlloc(&gpu_best_energy, sizeof(float), 0);
  
-	// Setup spin values (DOUBLE BUFFERED)
 	signed char *gpu_spins_old;
-	signed char *gpu_spins_new;
 	
 	gpuErrchk(cudaMalloc((void**)&gpu_spins_old, num_spins * sizeof(signed char)));
-	gpuErrchk(cudaMalloc((void**)&gpu_spins_new, num_spins * sizeof(signed char)));
+
+	FlipCandidate* gpu_candidates;
+	gpuErrchk(cudaMalloc((void**)&gpu_candidates, num_spins * sizeof(FlipCandidate)));
+	
+	int* gpu_num_candidates;
+	gpuErrchk(cudaMalloc((void**)&gpu_num_candidates, sizeof(int)));
 
 	std::cout << "initialize spin values " << std::endl;
 	// int blocks = (num_spins + THREADS - 1) / THREADS;
