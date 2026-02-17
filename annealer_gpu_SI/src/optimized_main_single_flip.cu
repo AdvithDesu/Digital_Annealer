@@ -667,6 +667,21 @@ __global__ void collectFlipCandidates(
 
 #endif
 
+__global__ void applySingleFlip(
+        signed char*   gpuLatSpin,
+        float*         d_total_energy,
+        FlipCandidate* candidates,
+        int            chosen_idx          // which candidate was selected
+){
+    // single thread is sufficient
+    if (threadIdx.x == 0 && blockIdx.x == 0) {
+        int   sid = candidates[chosen_idx].spin_id;
+        float dE  = candidates[chosen_idx].delta_energy;
+        gpuLatSpin[sid] = -gpuLatSpin[sid];
+        atomicAdd(d_total_energy, dE);
+    }
+}
+
 // Initialize lattice spins
 __global__ void init_spins_total_energy(
 		const int* row_ptr,
