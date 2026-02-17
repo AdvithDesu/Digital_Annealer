@@ -427,9 +427,6 @@ int main(int argc, char* argv[])
   	cudaDeviceSynchronize();
 
 	gpuErrchk(cudaMemcpy(gpu_total_energy, d_total_energy, sizeof(float), cudaMemcpyDeviceToHost));
-
-	// copy initial spins into new buffer
-	gpuErrchk(cudaMemcpy(gpu_spins_new, gpu_spins_old, num_spins*sizeof(signed char), cudaMemcpyDeviceToDevice));
       
  	endtime = rtclock();
 
