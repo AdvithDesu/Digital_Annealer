@@ -302,3 +302,49 @@ ProblemVars initializeVariables(uint64_t N) {
     }
     return pv;
 }
+
+// ============================================================
+// Generate column clauses
+// ============================================================
+std::vector<Poly> generateColumnClauses(uint64_t N, const ProblemVars& pv) {
+    int n_m = pv.n_p + pv.n_q;
+    // get bits of N, LSB first
+    std::vector<int> Nbits(n_m, 0);
+    for (int i = 0; i < n_m; i++) Nbits[i] = (int)((N >> i) & 1);
+
+    std::vector<Poly> clauses;
+    for (int i = 1; i < n_m; i++) {
+        Poly clause = polyConst(Nbits[i]);
+
+        // subtract product terms
+        for (int j = 0; j < pv.n_p; j++) {
+            int qidx = i - j;
+            if (qidx >= 0 && qidx < pv.n_q) {
+                auto pit = pv.p.find(j);
+                auto qit = pv.q.find(qidx);
+                if (pit != pv.p.end() && qit != pv.q.end()) {
+                    Poly pterm = polyMul(pit->second, qit->second);
+                    clause = polySub(clause, pterm);
+                }
+            }
+        }
+
+        // subtract input carries
+        for (int k = 1; k < i; k++) {
+            auto it = pv.s.find({k, i});
+            if (it != pv.s.end() && !isZero(it->second))
+                clause = polySub(clause, it->second);
+        }
+
+        // add output carries
+        for (int j = 1; ; j++) {
+            auto it = pv.s.find({i, i + j});
+            if (it == pv.s.end() || isZero(it->second)) break;
+            int64_t scale = (int64_t)1 << j;
+            clause = polyAdd(clause, polyScale(it->second, scale));
+        }
+
+        clauses.push_back(clause);
+    }
+    return clauses;
+}
