@@ -949,3 +949,97 @@ void saveExpressionConstraints(const std::string& filename,
     for (auto& [nm, p] : expr)
         f << nm << " = " << polyStr(p) << "\n";
 }
+
+// ============================================================
+// Main
+// ============================================================
+int main(int argc, char* argv[]) {
+    if (argc < 2) {
+        std::cerr << "Usage: " << argv[0] << " <N>\n";
+        return 1;
+    }
+
+    uint64_t N = std::stoull(argv[1]);
+
+    auto t0 = std::chrono::high_resolution_clock::now();
+
+    // Step 1: initialize variables
+    ProblemVars pv = initializeVariables(N);
+
+    // Step 2: generate column clauses
+    std::vector<Poly> clauses = generateColumnClauses(N, pv);
+    std::cout << "Generated " << clauses.size() << " column clauses\n";
+
+    // Step 3: simplify
+    SimplifierResult sr = clauseSimplifier(std::move(clauses));
+    std::cout << "After simplification: " << sr.assignmentConstraints.size()
+              << " assignment constraints, "
+              << sr.expressionConstraints.size() << " expression constraints\n";
+
+    // Count non-zero remaining clauses
+    int nonZero = 0;
+    for (auto& c : sr.clauses) if (!isZero(c)) nonZero++;
+    std::cout << "Non-zero remaining clauses: " << nonZero << "\n";
+
+    // Step 4: build QUBO
+    double offset = 0.0;
+    QUBODict Q = buildQUBO(sr.clauses, offset);
+    std::cout << "QUBO has " << Q.size() << " entries (offset=" << offset << ")\n";
+
+    // Collect active variables (those appearing in Q)
+    std::set<int> activeSet;
+    for (auto& [key, val] : Q) {
+        activeSet.insert(key.first);
+        activeSet.insert(key.second);
+    }
+    std::vector<int> activeIdx(activeSet.begin(), activeSet.end());
+    std::sort(activeIdx.begin(), activeIdx.end());
+
+    // Remap to contiguous 0..n-1
+    std::unordered_map<int,int> remap;
+    std::vector<std::string> activeVarNames;
+    for (int i = 0; i < (int)activeIdx.size(); i++) {
+        remap[activeIdx[i]] = i;
+        activeVarNames.push_back(G_vars.name(activeIdx[i]));
+    }
+    int numVars = (int)activeIdx.size();
+    std::cout << "Active QUBO variables: " << numVars << "\n";
+
+    // Remap Q keys
+    QUBODict Qremapped;
+    for (auto& [key, val] : Q) {
+        int ri = remap[key.first], rj = remap[key.second];
+        if (ri > rj) std::swap(ri, rj);
+        Qremapped[{ri, rj}] += val;
+    }
+
+    // Step 5: convert to Ising CSR
+    IsingCSR ising = quboToIsingCSR(Qremapped, numVars);
+    ising.offset += offset;
+
+    auto t1 = std::chrono::high_resolution_clock::now();
+    double elapsed = std::chrono::duration<double>(t1 - t0).count();
+    std::cout << "Total construction time: " << elapsed << " seconds\n";
+
+    // Step 6: save outputs
+    std::string Nstr = std::to_string(N);
+    saveCSV("row_ptr_" + Nstr + ".csv",    ising.row_ptr);
+    saveCSV("col_idx_" + Nstr + ".csv",    ising.col_idx);
+    saveCSV("J_values_" + Nstr + ".csv",   ising.values);
+    saveHVector("h_vector_" + Nstr + ".csv", ising.h);
+    saveIndexToVar("index_to_var_" + Nstr + ".txt", activeVarNames, activeIdx);
+    saveAssignmentConstraints("assignment_constraints_" + Nstr + ".txt", sr.assignmentConstraints);
+    saveExpressionConstraints("expression_constraints_" + Nstr + ".txt", sr.expressionConstraints);
+
+    // Print QUBO dict summary (first 20 entries)
+    std::cout << "\nQUBO dict (first 20 non-zero entries):\n";
+    int cnt = 0;
+    for (auto& [key, val] : Qremapped) {
+        if (cnt++ >= 20) break;
+        std::cout << "  (" << key.first << "," << key.second << ") -> " << val
+                  << "  [" << activeVarNames[key.first] << " x " << activeVarNames[key.second] << "]\n";
+    }
+
+    std::cout << "\nDone. Output files written with prefix *_" << Nstr << ".*\n";
+    return 0;
+}
