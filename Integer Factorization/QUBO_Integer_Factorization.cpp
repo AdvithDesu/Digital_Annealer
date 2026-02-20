@@ -173,3 +173,75 @@ Poly polySubExpr(const Poly& p, int idx, const Poly& expr) {
     }
     return res;
 }
+
+// apply binary rule: x^n = x  (terms with duplicate vars collapse to lower degree)
+// Actually our mulMon already handles this with set_union, so polynomials stay reduced.
+// This is a no-op here but kept for clarity.
+Poly applyPowerRule(const Poly& p) { return p; }
+
+int64_t getConst(const Poly& p) {
+    auto it = p.find(CONST_MON);
+    return it != p.end() ? it->second : 0;
+}
+
+int64_t getCoeff(const Poly& p, int idx) {
+    Monomial m = {idx};
+    auto it = p.find(m);
+    return it != p.end() ? it->second : 0;
+}
+
+bool isZero(const Poly& p) { return p.empty(); }
+
+int64_t gcdAbs(int64_t a, int64_t b) {
+    a = std::abs(a); b = std::abs(b);
+    while (b) { a %= b; std::swap(a, b); }
+    return a ? a : 1;
+}
+
+int64_t polyGCD(const Poly& p) {
+    int64_t g = 0;
+    for (auto& [m, c] : p) g = gcdAbs(g, c);
+    return g == 0 ? 1 : g;
+}
+
+Poly polyDivideConst(const Poly& p, int64_t d) {
+    Poly res;
+    for (auto& [m, c] : p) res[m] = c / d;
+    return res;
+}
+
+// free variables (non-constant) in poly
+std::set<int> freeVars(const Poly& p) {
+    std::set<int> vs;
+    for (auto& [m, c] : p)
+        for (int v : m) vs.insert(v);
+    return vs;
+}
+
+// print a poly for debugging
+std::string polyStr(const Poly& p) {
+    if (p.empty()) return "0";
+    std::string s;
+    for (auto& [m, c] : p) {
+        if (!s.empty()) s += " + ";
+        s += std::to_string(c);
+        for (int v : m) s += "*" + G_vars.name(v);
+    }
+    return s;
+}
+
+// ============================================================
+// Constraint types
+// ============================================================
+
+// A "value constraint": var = integer (0 or 1)
+struct ValConstraint {
+    std::string varName;
+    int value;  // 0 or 1
+};
+
+// An "expression constraint": var = Poly expression
+struct ExprConstraint {
+    std::string varName;
+    Poly        expr;
+};
