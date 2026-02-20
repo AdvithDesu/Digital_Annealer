@@ -28,3 +28,18 @@
  *   row_ptr_N.csv, col_idx_N.csv, J_values_N.csv, h_vector_N.csv
  *   index_to_var_N.txt, assignment_constraints_N.txt, expression_constraints_N.txt
  */
+
+#include <algorithm>
+#include <cassert>
+#include <chrono>
+#include <cmath>
+#include <cstdint>
+#include <fstream>
+#include <iostream>
+#include <map>
+#include <numeric>
+#include <set>
+#include <sstream>
+#include <string>
+#include <unordered_map>
+#include <vector>
