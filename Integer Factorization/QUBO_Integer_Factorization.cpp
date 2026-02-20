@@ -43,3 +43,37 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+
+// ============================================================
+// Variable registry  (string name <-> int index)
+// ============================================================
+struct VarRegistry {
+    std::unordered_map<std::string, int> nameToIdx;
+    std::vector<std::string>             idxToName;
+
+    int get(const std::string& name) {
+        auto it = nameToIdx.find(name);
+        if (it != nameToIdx.end()) return it->second;
+        int idx = (int)idxToName.size();
+        nameToIdx[name] = idx;
+        idxToName.push_back(name);
+        return idx;
+    }
+    const std::string& name(int idx) const { return idxToName[idx]; }
+    int size() const { return (int)idxToName.size(); }
+};
+
+VarRegistry G_vars;  // global registry
+
+// ============================================================
+// Monomial = sorted list of distinct variable indices
+// ============================================================
+using Monomial = std::vector<int>;
+
+struct MonomialHash {
+    size_t operator()(const Monomial& m) const {
+        size_t h = 0;
+        for (int v : m) h ^= std::hash<int>()(v) + 0x9e3779b9 + (h << 6) + (h >> 2);
+        return h;
+    }
+};
