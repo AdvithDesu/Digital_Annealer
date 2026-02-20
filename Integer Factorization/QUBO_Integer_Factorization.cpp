@@ -756,3 +756,93 @@ SimplifierResult clauseSimplifier(std::vector<Poly> clauses) {
     result.clauses = result.clauses;
     return result;
 }
+
+// ============================================================
+// Build QUBO: H = sum_i clause_i^2
+// qubo[(i,j)] += coeff  for i<=j  (upper triangular)
+// ============================================================
+using QUBODict = std::map<std::pair<int,int>, double>;
+
+// get or create a fresh auxiliary variable index
+static int g_auxCounter = 0;
+int newAuxVar(const std::string& prefix) {
+    std::string nm = prefix + std::to_string(g_auxCounter++);
+    return G_vars.get(nm);
+}
+
+// The QUBO is built directly from squaring polynomials.
+// For binary vars: x*x = x.  Our mulMon already handles this.
+QUBODict buildQUBO(const std::vector<Poly>& clauses, double& offset) {
+    // First, collect all monomials from H = sum clause^2
+    // We expand clause^2 and accumulate into a single Poly
+    Poly H;
+    for (auto& clause : clauses) {
+        if (isZero(clause)) continue;
+        Poly sq = polyMul(clause, clause);
+        for (auto& [m, c] : sq) addTerm(H, m, c);
+    }
+
+    // Now H is a polynomial in binary variables.
+    // Degree > 2 terms need quadratization.
+    // We apply simple substitution: for a degree-3 monomial xyz, introduce w=xy (penalty: w(w-1) = 0 for binary... but we use QUBO penalty)
+    // Simple iterative approach: find any monomial of degree > 2, reduce it.
+
+    // Quadratize: replace each degree-3+ monomial with auxiliary vars
+    // We repeatedly reduce until all monomials are degree <= 2.
+    bool reduced = false;
+    int quadIter = 0;
+    while (!reduced && quadIter < 10000) {
+        reduced = true;
+        quadIter++;
+        Poly newH;
+        for (auto& [m, c] : H) {
+            if (m.size() <= 2) {
+                addTerm(newH, m, c);
+                continue;
+            }
+            reduced = false;
+            // take first two vars in monomial
+            int va = m[0], vb = m[1];
+            // introduce w = va * vb
+            // find or create auxiliary
+            std::string aname = "w_" + G_vars.name(va) + "_" + G_vars.name(vb);
+            int w = G_vars.get(aname);
+
+            // replace va*vb with w in this monomial
+            Monomial newM;
+            newM.push_back(w);
+            for (int i = 2; i < (int)m.size(); i++) newM.push_back(m[i]);
+            std::sort(newM.begin(), newM.end());
+            addTerm(newH, newM, c);
+
+            // Add penalty: lambda*(w - 2*w*va - 2*w*vb + va*vb + 3*w)
+            // Standard QUBO penalty for w = va*vb:
+            // P = lambda * (3w + va*vb - 2*w*va - 2*w*vb)
+            // We pick lambda = |c| + 1 to dominate
+            int64_t lam = std::abs(c) + 1;
+            addTerm(newH, {w},        3 * lam);
+            addTerm(newH, {va, vb},   lam);
+            addTerm(newH, {w, va},   -2 * lam);
+            addTerm(newH, {w, vb},   -2 * lam);
+        }
+        H = newH;
+    }
+
+    // Now convert to QUBO dict (upper triangular)
+    QUBODict Q;
+    offset = 0.0;
+    for (auto& [m, c] : H) {
+        if (m.empty()) { offset += (double)c; continue; }
+        if (m.size() == 1) {
+            auto key = std::make_pair(m[0], m[0]);
+            Q[key] += (double)c;
+        } else {
+            // degree 2
+            int i = m[0], j = m[1];
+            if (i > j) std::swap(i, j);
+            auto key = std::make_pair(i, j);
+            Q[key] += (double)c;
+        }
+    }
+    return Q;
+}
