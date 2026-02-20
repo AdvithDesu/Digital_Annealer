@@ -245,3 +245,60 @@ struct ExprConstraint {
     std::string varName;
     Poly        expr;
 };
+
+// ============================================================
+// Initialize variables
+// ============================================================
+struct ProblemVars {
+    int n_p, n_q;
+    // fixed vars: p[0]=1, p[n_p-1]=1, q[0]=1, q[n_q-1]=1
+    // free vars registered in G_vars
+    std::unordered_map<int, Poly> p;  // bit index -> Poly (constant 1 or single var)
+    std::unordered_map<int, Poly> q;
+    std::map<std::pair<int,int>, Poly> s;  // (from_col, to_col) -> Poly
+};
+
+ProblemVars initializeVariables(uint64_t N) {
+    ProblemVars pv;
+    int n_m = (int)std::ceil(std::log2((double)N + 1));
+    pv.n_q  = (int)std::ceil(0.5 * std::log2((double)N));
+    pv.n_p  = pv.n_q;
+
+    std::cout << "Factoring N = " << N << " (" << n_m << " bits)\n";
+    std::cout << "Assuming n_p = " << pv.n_p << ", n_q = " << pv.n_q << "\n";
+
+    // p variables
+    pv.p[0] = polyConst(1);
+    pv.p[pv.n_p - 1] = polyConst(1);
+    for (int i = 1; i < pv.n_p - 1; i++) {
+        std::string nm = "p_" + std::to_string(i);
+        pv.p[i] = polyVar(G_vars.get(nm));
+    }
+    // If n_p == 1, only index 0 exists (already set)
+    // If n_p == 2, index 0 and 1 are both fixed
+    if (pv.n_p == 1) { /* nothing extra */ }
+
+    // q variables
+    pv.q[0] = polyConst(1);
+    pv.q[pv.n_q - 1] = polyConst(1);
+    for (int i = 1; i < pv.n_q - 1; i++) {
+        std::string nm = "q_" + std::to_string(i);
+        pv.q[i] = polyVar(G_vars.get(nm));
+    }
+
+    // carry variables s[col_from][col_to]
+    for (int i = 1; i < pv.n_p + pv.n_q; i++) {
+        int num_prod = std::min(i, pv.n_q - 1) - std::max(i - pv.n_p + 1, 0) + 1;
+        int max_sum  = num_prod + (i - 1);
+        if (max_sum > 1) {
+            int bits = (int)std::floor(std::log2((double)max_sum));
+            for (int j = 1; j <= bits; j++) {
+                if (i + j < pv.n_p + pv.n_q) {
+                    std::string nm = "s_" + std::to_string(i) + "_" + std::to_string(i + j);
+                    pv.s[{i, i + j}] = polyVar(G_vars.get(nm));
+                }
+            }
+        }
+    }
+    return pv;
+}
