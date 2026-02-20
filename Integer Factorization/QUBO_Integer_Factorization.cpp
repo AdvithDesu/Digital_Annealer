@@ -631,3 +631,128 @@ void applyExprSub(std::vector<Poly>& clauses, int varIdx, const Poly& expr) {
     for (auto& c : clauses)
         c = polySubExpr(c, varIdx, expr);
 }
+
+// ============================================================
+// Clause simplifier (mirrors clause_simplifier in Python)
+// ============================================================
+struct SimplifierResult {
+    std::vector<Poly> clauses;
+    // assignment constraints: var name -> value (0 or 1)
+    std::vector<std::pair<std::string,int>>   assignmentConstraints;
+    // expression constraints: var name -> Poly expression
+    std::vector<std::pair<std::string,Poly>>  expressionConstraints;
+    // mul constraints (simplified: just expression constraints for now)
+};
+
+SimplifierResult clauseSimplifier(std::vector<Poly> clauses) {
+    SimplifierResult result;
+    result.clauses = std::move(clauses);
+
+    int maxIter = 2 * (int)result.clauses.size();
+    std::cout << "Total iterations possible: " << maxIter << "\n";
+
+    for (int iter = 0; iter < maxIter; iter++) {
+        bool changed = false;
+
+        // --- Divide by GCD ---
+        for (auto& c : result.clauses) {
+            if (!isZero(c)) {
+                int64_t g = polyGCD(c);
+                if (g > 1) c = polyDivideConst(c, g);
+            }
+        }
+
+        // --- Rule 1 & 2 ---
+        for (auto& clause : result.clauses) {
+            auto cons = applyRule12(clause);
+            if (!cons.empty()) {
+                for (auto& [v, val] : cons) {
+                    std::string nm = G_vars.name(v);
+                    result.assignmentConstraints.push_back({nm, val});
+                    applyValueSub(result.clauses, v, val);
+                }
+                changed = true;
+                break;
+            }
+        }
+
+        // --- Rule 4 ---
+        for (auto& clause : result.clauses) {
+            auto cons = applyRule4(clause);
+            if (!cons.empty()) {
+                for (auto& [v, val] : cons) {
+                    std::string nm = G_vars.name(v);
+                    result.assignmentConstraints.push_back({nm, val});
+                    applyValueSub(result.clauses, v, val);
+                }
+                changed = true;
+                break;
+            }
+        }
+
+        // --- Rule 3 ---
+        for (auto& clause : result.clauses) {
+            auto cons = applyRule3(clause);
+            if (!cons.empty()) {
+                for (auto& [v, expr] : cons) {
+                    std::string nm = G_vars.name(v);
+                    // check if p or q
+                    if (nm[0] == 'p' || nm[0] == 'q')
+                        result.expressionConstraints.push_back({nm, expr});
+                    applyExprSub(result.clauses, v, expr);
+                }
+                changed = true;
+                break;
+            }
+        }
+
+        // --- Rule 6 ---
+        for (auto& clause : result.clauses) {
+            auto cons = applyRule6(clause);
+            if (!cons.empty()) {
+                for (auto& [v, expr] : cons) {
+                    std::string nm = G_vars.name(v);
+                    if (nm[0] == 'p' || nm[0] == 'q')
+                        result.expressionConstraints.push_back({nm, expr});
+                    applyExprSub(result.clauses, v, expr);
+                }
+                changed = true;
+                break;
+            }
+        }
+
+        // --- Parity rule ---
+        for (auto& clause : result.clauses) {
+            auto cons = applyParityRule(clause);
+            if (!cons.empty()) {
+                for (auto& [v, expr] : cons) {
+                    std::string nm = G_vars.name(v);
+                    if (nm[0] == 'p' || nm[0] == 'q')
+                        result.expressionConstraints.push_back({nm, expr});
+                    applyExprSub(result.clauses, v, expr);
+                }
+                changed = true;
+                break;
+            }
+        }
+
+        // --- Replacement ---
+        if (!changed) {
+            auto cons = applyReplacement(result.clauses);
+            if (!cons.empty()) {
+                for (auto& [v, expr] : cons) {
+                    std::string nm = G_vars.name(v);
+                    if (nm[0] == 'p' || nm[0] == 'q')
+                        result.expressionConstraints.push_back({nm, expr});
+                    applyExprSub(result.clauses, v, expr);
+                }
+                changed = true;
+            } else {
+                break;  // no rule fired, done
+            }
+        }
+    }
+
+    result.clauses = result.clauses;
+    return result;
+}
