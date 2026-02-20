@@ -905,3 +905,47 @@ IsingCSR quboToIsingCSR(const QUBODict& Q, int numVars) {
     ising.row_ptr[numVars] = nnz;
     return ising;
 }
+
+// ============================================================
+// Output / save
+// ============================================================
+void saveCSV(const std::string& filename, const std::vector<int>& v) {
+    std::ofstream f(filename);
+    for (int x : v) f << x << "\n";
+}
+void saveCSV(const std::string& filename, const std::vector<double>& v) {
+    std::ofstream f(filename);
+    f.precision(8); f << std::fixed;
+    for (double x : v) f << x << "\n";
+}
+void saveHVector(const std::string& filename, const std::vector<double>& h) {
+    std::ofstream f(filename);
+    f.precision(8); f << std::fixed;
+    for (int i = 0; i < (int)h.size(); i++) {
+        if (i) f << ",";
+        f << h[i];
+    }
+    f << "\n";
+}
+
+void saveIndexToVar(const std::string& filename,
+                    const std::vector<std::string>& activeVars,
+                    const std::vector<int>& activeIdx) {
+    std::ofstream f(filename);
+    for (int i = 0; i < (int)activeVars.size(); i++)
+        f << i << " " << activeVars[i] << " (global_idx=" << activeIdx[i] << ")\n";
+}
+
+void saveAssignmentConstraints(const std::string& filename,
+    const std::vector<std::pair<std::string,int>>& ass) {
+    std::ofstream f(filename);
+    for (auto& [nm, val] : ass)
+        f << nm << " = " << val << "\n";
+}
+
+void saveExpressionConstraints(const std::string& filename,
+    const std::vector<std::pair<std::string,Poly>>& expr) {
+    std::ofstream f(filename);
+    for (auto& [nm, p] : expr)
+        f << nm << " = " << polyStr(p) << "\n";
+}
