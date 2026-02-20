@@ -348,3 +348,286 @@ std::vector<Poly> generateColumnClauses(uint64_t N, const ProblemVars& pv) {
     }
     return clauses;
 }
+
+// ============================================================
+// Constraint application rules
+// ============================================================
+
+// Helper: is this Poly a single variable (degree-1 monomial with coeff +-1)?
+bool isSingleVar(const Poly& p, int& outIdx, int64_t& outCoeff) {
+    if (p.size() != 1) return false;
+    auto& [m, c] = *p.begin();
+    if (m.size() == 1 && (c == 1 || c == -1)) {
+        outIdx   = m[0];
+        outCoeff = c;
+        return true;
+    }
+    return false;
+}
+
+// Rule 1 & 2: all vars same sign and sum = const matches count -> fix all to 0 or 1
+// Returns map var->value, empty if rule doesn't apply
+std::unordered_map<int,int> applyRule12(const Poly& clause) {
+    std::unordered_map<int,int> res;
+    if (isZero(clause)) return res;
+
+    int64_t constTerm = getConst(clause);
+
+    // collect linear terms only (degree 1)
+    std::vector<std::pair<int,int64_t>> linTerms;
+    for (auto& [m, c] : clause) {
+        if (m.empty()) continue;
+        if (m.size() == 1) linTerms.push_back({m[0], c});
+        else return res;  // has higher degree terms, rule doesn't apply
+    }
+
+    if (linTerms.empty()) return res;
+    int64_t n = (int64_t)linTerms.size();
+
+    // all coeff == -1 and const == n  -> all vars = 1
+    bool allNeg = std::all_of(linTerms.begin(), linTerms.end(), [](auto& p){ return p.second == -1; });
+    if (allNeg && constTerm == n) {
+        for (auto& [v, c] : linTerms) res[v] = 1;
+        return res;
+    }
+    // all coeff == +1 and const == -n -> all vars = 1
+    bool allPos = std::all_of(linTerms.begin(), linTerms.end(), [](auto& p){ return p.second == 1; });
+    if (allPos && constTerm == -n) {
+        for (auto& [v, c] : linTerms) res[v] = 1;
+        return res;
+    }
+    // all coeff == +1 and const == 0  -> all vars = 0
+    if (allPos && constTerm == 0) {
+        for (auto& [v, c] : linTerms) res[v] = 0;
+        return res;
+    }
+    // all coeff == -1 and const == 0  -> all vars = 0
+    if (allNeg && constTerm == 0) {
+        for (auto& [v, c] : linTerms) res[v] = 0;
+        return res;
+    }
+    return res;
+}
+
+// Rule 4: coefficient dominance
+// If |c_i| > sum of all other |coefficients| (including const), var is determined
+std::unordered_map<int,int> applyRule4(const Poly& clause) {
+    std::unordered_map<int,int> res;
+    if (isZero(clause)) return res;
+
+    int64_t constTerm = getConst(clause);
+
+    // collect linear terms only
+    std::vector<std::pair<int,int64_t>> linTerms;
+    for (auto& [m, c] : clause) {
+        if (m.empty()) continue;
+        if (m.size() == 1) linTerms.push_back({m[0], c});
+        else return res;
+    }
+
+    // separate positive and negative
+    int64_t posSum = 0, negSum = 0;
+    for (auto& [v, c] : linTerms) {
+        if (c > 0) posSum += c;
+        else       negSum += (-c);
+    }
+
+    for (auto& [v, c] : linTerms) {
+        if (c > 0) {
+            if (c > negSum - constTerm) res[v] = 0;
+            if (c > posSum + constTerm) res[v] = 1;
+        } else {
+            int64_t ac = -c;
+            if (ac > posSum + constTerm) res[v] = 0;
+            if (ac > negSum - constTerm) res[v] = 1;
+        }
+    }
+    return res;
+}
+
+// Rule 3: clause has exactly 3 linear terms that match x1 + x2 - 2*x3 = 0
+// Returns {var_to_eliminate -> expression} plus mul_ass (simplified here)
+// We try to find s variable to substitute
+std::unordered_map<int,Poly> applyRule3(const Poly& clause) {
+    std::unordered_map<int,Poly> res;
+    if (isZero(clause)) return res;
+
+    int64_t constTerm = getConst(clause);
+    if (constTerm != 0) return res;
+
+    std::vector<std::pair<int,int64_t>> linTerms;
+    for (auto& [m, c] : clause) {
+        if (m.empty()) continue;
+        if (m.size() == 1) linTerms.push_back({m[0], c});
+        else return res;
+    }
+    if (linTerms.size() != 3) return res;
+
+    // find the one with coeff +-2
+    int twoIdx = -1;
+    for (int i = 0; i < 3; i++)
+        if (std::abs(linTerms[i].second) == 2) { twoIdx = i; break; }
+    if (twoIdx < 0) return res;
+
+    int64_t twoSign  = (linTerms[twoIdx].second > 0) ? 1 : -1;
+    int64_t restSign = -twoSign;  // the other two should sum to twoSign * x3
+
+    // check other two have coeff restSign
+    bool ok = true;
+    for (int i = 0; i < 3; i++) {
+        if (i == twoIdx) continue;
+        if (linTerms[i].second != restSign) { ok = false; break; }
+    }
+    if (!ok) return res;
+
+    // x1 + x2 = 2*x3 (up to sign)
+    // Substitute x3 = (x1 + x2) / 2  -- not integer, so instead substitute
+    // the s_ variable if present
+    int v3 = linTerms[twoIdx].first;
+    int v1 = linTerms[(twoIdx+1)%3].first;
+    int v2 = linTerms[(twoIdx+2)%3].first;
+
+    // x3 = x1  (since binary, x1=x2=x3 follows)
+    // prefer to eliminate s_ variable
+    std::string n3 = G_vars.name(v3), n1 = G_vars.name(v1), n2 = G_vars.name(v2);
+
+    auto hasS = [](const std::string& s){ return s.rfind("s_",0)==0; };
+
+    if (hasS(n3)) {
+        res[v3] = polyVar(v1);  // s = x1 (and x1=x2 implied, but we only do one sub)
+    } else if (hasS(n1)) {
+        res[v1] = polyVar(v3);
+    } else if (hasS(n2)) {
+        res[v2] = polyVar(v3);
+    } else {
+        res[v3] = polyVar(v1);
+    }
+    return res;
+}
+
+// Rule 6: two large positive (or negative) terms dominate -> complementary
+std::unordered_map<int,Poly> applyRule6(const Poly& clause) {
+    std::unordered_map<int,Poly> res;
+    if (isZero(clause)) return res;
+
+    int64_t constTerm = getConst(clause);
+    std::vector<std::pair<int,int64_t>> linTerms;
+    for (auto& [m, c] : clause) {
+        if (m.empty()) continue;
+        if (m.size() == 1) linTerms.push_back({m[0], c});
+        else return res;
+    }
+
+    std::vector<std::pair<int,int64_t>> pos, neg;
+    for (auto& kv : linTerms) {
+        if (kv.second > 0) pos.push_back(kv);
+        else               neg.push_back({kv.first, -kv.second});
+    }
+    std::sort(pos.begin(), pos.end(), [](auto& a, auto& b){ return a.second > b.second; });
+    std::sort(neg.begin(), neg.end(), [](auto& a, auto& b){ return a.second > b.second; });
+
+    int64_t posSum = 0, negSum = 0;
+    for (auto& kv : pos) posSum += kv.second;
+    for (auto& kv : neg) negSum += kv.second;
+
+    auto hasS = [](const std::string& s){ return s.rfind("s_",0)==0; };
+
+    // positive dominance case
+    if (posSum > negSum - constTerm && constTerm < 0 && pos.size() >= 2) {
+        int64_t cy = pos[0].second, cx = pos[1].second;
+        if (cy + cx > negSum - constTerm && -constTerm - posSum + cy + cx > 0) {
+            int vy = pos[0].first, vx = pos[1].first;
+            // y = 1 - x
+            Poly oneMinusX = polyAdd(polyConst(1), polyScale(polyVar(vx), -1));
+            if (hasS(G_vars.name(vy)))
+                res[vy] = oneMinusX;
+            else
+                res[vy] = oneMinusX;
+        }
+    }
+    // negative dominance case
+    if (negSum > posSum + constTerm && constTerm > 0 && neg.size() >= 2) {
+        int64_t cy = neg[0].second, cx = neg[1].second;
+        if (cy + cx > posSum + constTerm && negSum - constTerm - cy - cx < 0) {
+            int vy = neg[0].first, vx = neg[1].first;
+            Poly oneMinusX = polyAdd(polyConst(1), polyScale(polyVar(vx), -1));
+            if (hasS(G_vars.name(vy)))
+                res[vy] = oneMinusX;
+            else
+                res[vy] = oneMinusX;
+        }
+    }
+    return res;
+}
+
+// Parity rule: find pairs of degree-1 terms with odd coefficients
+std::unordered_map<int,Poly> applyParityRule(const Poly& clause) {
+    std::unordered_map<int,Poly> res;
+    if (isZero(clause)) return res;
+
+    std::vector<std::pair<int,int64_t>> oddTerms;
+    for (auto& [m, c] : clause) {
+        if (m.empty()) continue;
+        if (m.size() == 1 && (std::abs(c) % 2 != 0))
+            oddTerms.push_back({m[0], (c % 2 + 2) % 2});  // reduce to +1
+    }
+    int64_t oddConst = (int64_t)(getConst(clause) % 2);
+    if (oddConst < 0) oddConst += 2;
+
+    if (oddTerms.size() == 2) {
+        int v1 = oddTerms[0].first, v2 = oddTerms[1].first;
+        std::string n1 = G_vars.name(v1), n2 = G_vars.name(v2);
+        auto hasS = [](const std::string& s){ return s.rfind("s_",0)==0; };
+        if (oddConst == 0) {
+            // v1 = v2
+            if (hasS(n1)) res[v1] = polyVar(v2);
+            else if (hasS(n2)) res[v2] = polyVar(v1);
+            else res[v1] = polyVar(v2);
+        } else {
+            // v1 = 1 - v2
+            Poly oneMinusV2 = polyAdd(polyConst(1), polyScale(polyVar(v2), -1));
+            if (hasS(n1)) res[v1] = oneMinusV2;
+            else if (hasS(n2)) res[v2] = polyAdd(polyConst(1), polyScale(polyVar(v1), -1));
+            else res[v1] = oneMinusV2;
+        }
+    }
+    return res;
+}
+
+// Replacement rule: find a clause where one s_ var can be isolated
+std::unordered_map<int,Poly> applyReplacement(const std::vector<Poly>& clauses) {
+    std::unordered_map<int,Poly> res;
+    for (auto& clause : clauses) {
+        if (isZero(clause)) continue;
+        for (auto& [m, c] : clause) {
+            if (m.size() != 1) continue;
+            int idx = m[0];
+            if (c != 1 && c != -1) continue;
+            std::string nm = G_vars.name(idx);
+            if (nm.rfind("s_", 0) != 0) continue;
+            // expr = -(clause - c*var) / c
+            Poly rest;
+            for (auto& [m2, c2] : clause) {
+                if (m2 == m) continue;
+                rest[m2] = c2;
+            }
+            // var = -rest / c
+            Poly val = polyScale(rest, -c);
+            res[idx] = val;
+            return res;
+        }
+    }
+    return res;
+}
+
+// Apply a value substitution to all clauses
+void applyValueSub(std::vector<Poly>& clauses, int varIdx, int value) {
+    for (auto& c : clauses)
+        c = polySub1(c, varIdx, value);
+}
+
+// Apply an expression substitution to all clauses
+void applyExprSub(std::vector<Poly>& clauses, int varIdx, const Poly& expr) {
+    for (auto& c : clauses)
+        c = polySubExpr(c, varIdx, expr);
+}
