@@ -846,3 +846,62 @@ QUBODict buildQUBO(const std::vector<Poly>& clauses, double& offset) {
     }
     return Q;
 }
+
+// ============================================================
+// Convert QUBO dict to Ising (h, J) and CSR
+// ============================================================
+struct IsingCSR {
+    std::vector<int>    row_ptr;
+    std::vector<int>    col_idx;
+    std::vector<double> values;
+    std::vector<double> h;
+    double              offset;
+};
+
+IsingCSR quboToIsingCSR(const QUBODict& Q, int numVars) {
+    // symmetrize: Q_sym(i,j) = (Q(i,j) + Q(j,i)) / 2
+    std::map<std::pair<int,int>, double> Qsym;
+    for (auto& [key, val] : Q) {
+        auto [i, j] = key;
+        if (i == j) {
+            Qsym[{i,i}] += val;
+        } else {
+            Qsym[{i,j}] += val / 2.0;
+            Qsym[{j,i}] += val / 2.0;
+        }
+    }
+
+    IsingCSR ising;
+    ising.h.assign(numVars, 0.0);
+    ising.offset = 0.0;
+
+    // Build adjacency list
+    std::vector<std::vector<std::pair<int,double>>> adj(numVars);
+    for (auto& [key, val] : Qsym) {
+        auto [i, j] = key;
+        if (i == j) {
+            ising.h[i] += 0.5 * val;
+            ising.offset += 0.5 * val;
+        } else {
+            double Jij = val / 2.0;
+            adj[i].push_back({j, Jij});
+            ising.h[i] += 0.5 * val;
+            ising.offset += 0.25 * val;
+        }
+    }
+
+    // Build CSR
+    ising.row_ptr.resize(numVars + 1, 0);
+    int nnz = 0;
+    for (int i = 0; i < numVars; i++) {
+        std::sort(adj[i].begin(), adj[i].end());
+        ising.row_ptr[i] = nnz;
+        for (auto& [j, v] : adj[i]) {
+            ising.col_idx.push_back(j);
+            ising.values.push_back(v);
+            nnz++;
+        }
+    }
+    ising.row_ptr[numVars] = nnz;
+    return ising;
+}
