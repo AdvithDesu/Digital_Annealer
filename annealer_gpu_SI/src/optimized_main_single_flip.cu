@@ -831,10 +831,22 @@ __global__ void collectFlipCandidates_sparse(
     int end   = row_ptr[vertice_Id + 1];
     int len   = end - start;
  
-    // ── Warp-strided accumulation ──────────────────────────────
-    float local_sum = 0.0f;
-    for (int k = lane; k < len; k += 32)
-        local_sum += J_values[start + k] * (float)gpuLatSpin[col_idx[start + k]];
+	// ── Warp-strided accumulation with hub constant-memory optimization ──
+	float local_sum = 0.0f;
+	for (int k = lane; k < len; k += 32) {
+	    int neighbor_id = col_idx[start + k];
+	    float neighbor_spin;
+	    
+	    // Check if neighbor is a hub — read from constant memory if so
+	    int hub_idx = find_hub_index(neighbor_id);
+	    if (hub_idx >= 0) {
+	        neighbor_spin = (float)c_hub_spin_vals[hub_idx];  // constant memory (L1 cached)
+	    } else {
+	        neighbor_spin = (float)gpuLatSpin[neighbor_id];   // global memory
+	    }
+	    
+	    local_sum += J_values[start + k] * neighbor_spin;
+	}
  
     // ── Warp-shuffle reduction (no shared mem, no __syncthreads)
     // GH100: full warp mask, single-cycle shuffle
