@@ -633,13 +633,18 @@ int main(int argc, char* argv[])
 				                            h_chosen.spin_id) != dense_spins.end();
 				    if (is_hub) {
 				        // Pull updated values for hub slots only (MAX_HUB_SPINS bytes — negligible)
-				        signed char h_hub_vals[MAX_HUB_SPINS];
-				        for (int hh = 0; hh < h_num_hub; hh++) {
-				            gpuErrchk(cudaMemcpy(&h_hub_vals[hh], gpu_spins_old + dense_spins[hh],
-				                                 sizeof(signed char),
-				                                 cudaMemcpyDeviceToHost));
-				        }
-				        cudaMemcpyToSymbol(c_hub_spin_vals, h_hub_vals, h_num_hub * sizeof(signed char));
+						signed char h_hub_vals[MAX_HUB_SPINS];
+						int h_dense_ids[MAX_HUB_SPINS];
+
+						gpuErrchk(cudaMemcpy(h_dense_ids, gpu_dense_ids, h_num_hub * sizeof(int), 
+												cudaMemcpyDeviceToHost));
+
+						for (int hh = 0; hh < h_num_hub; hh++) {
+						    gpuErrchk(cudaMemcpy(&h_hub_vals[hh], gpu_spins_old + h_dense_ids[hh],
+						                         sizeof(signed char),
+						                         cudaMemcpyDeviceToHost));
+						}
+						cudaMemcpyToSymbol(c_hub_spin_vals, h_hub_vals, h_num_hub * sizeof(signed char));
 				    }
 				}
 
