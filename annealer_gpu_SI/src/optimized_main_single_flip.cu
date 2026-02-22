@@ -520,6 +520,18 @@ int main(int argc, char* argv[])
  	endtime = rtclock();
 
 	printtime("init_spins values and calculate total Energy time: ", starttime, endtime);
+
+	// ── Initialize hub values in constant memory before annealing ────────
+	{
+	    signed char h_hub_vals[MAX_HUB_SPINS];
+	    for (int hh = 0; hh < h_num_hub; hh++) {
+	        gpuErrchk(cudaMemcpy(&h_hub_vals[hh], 
+	                             gpu_spins_old + dense_spins[hh],
+	                             sizeof(signed char),
+	                             cudaMemcpyDeviceToHost));
+	    }
+	    cudaMemcpyToSymbol(c_hub_spin_vals, h_hub_vals, h_num_hub * sizeof(signed char));
+	}
  
 	gpuErrchk(cudaPeekAtLastError());
 
