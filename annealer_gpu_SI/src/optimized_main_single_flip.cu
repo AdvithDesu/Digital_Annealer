@@ -482,6 +482,20 @@ int main(int argc, char* argv[])
 	// create random states    
 	curandState* devRanStates;
 	cudaMalloc(&devRanStates, num_spins * sizeof(curandState));
+
+	// Dense kernel: maximise shared memory (large hub row reductions)
+	cudaFuncSetAttribute(
+	    collectFlipCandidates_dense,
+	    cudaFuncAttributePreferredSharedMemoryCarveout,
+	    cudaSharedmemCarveoutMaxShared
+	);
+	 
+	// Sparse kernel: no shared memory — maximise L1 cache instead
+	cudaFuncSetAttribute(
+	    collectFlipCandidates_sparse,
+	    cudaFuncAttributePreferredSharedMemoryCarveout,
+	    cudaSharedmemCarveoutMaxL1
+	);
  	
    	starttime = rtclock();
 
