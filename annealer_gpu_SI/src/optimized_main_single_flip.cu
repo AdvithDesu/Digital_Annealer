@@ -139,6 +139,20 @@ __global__ void collectFlipCandidates(
         int*           num_candidates     // output: atomic counter
 );
 
+
+__global__ void collectFlipCandidates_dense(
+        const int*     row_ptr,
+        const int*     col_idx,
+        const float*   J_values,
+        float*         gpuLinTermsVect,
+        const float* __restrict__ randvals,
+        signed char*   gpuLatSpin,
+        const float    beta,
+        FlipCandidate* candidates,
+        int*           num_candidates,
+        const int*     dense_spin_ids   // maps blockIdx.x → global spin id
+)
+
 __global__ void applySingleFlip(
         signed char*   gpuLatSpin,
         float*         d_total_energy,
@@ -736,6 +750,52 @@ __global__ void collectFlipCandidates(
 }
 
 #endif
+
+__global__ void collectFlipCandidates_dense(
+        const int*     row_ptr,
+        const int*     col_idx,
+        const float*   J_values,
+        float*         gpuLinTermsVect,
+        const float* __restrict__ randvals,
+        signed char*   gpuLatSpin,
+        const float    beta,
+        FlipCandidate* candidates,
+        int*           num_candidates,
+        const int*     dense_spin_ids   // maps blockIdx.x → global spin id
+){
+    int vertice_Id = dense_spin_ids[blockIdx.x];   // global spin index
+    int p_Id       = threadIdx.x;
+ 
+    __shared__ float sh_mem[THREADS];
+    sh_mem[p_Id] = 0.0f;
+    __syncthreads();
+ 
+    float current_spin = (float)gpuLatSpin[vertice_Id];
+ 
+    int start = row_ptr[vertice_Id];
+    int end   = row_ptr[vertice_Id + 1];
+ 
+    for (int k = start + p_Id; k < end; k += blockDim.x)
+        sh_mem[p_Id] += J_values[k] * (float)gpuLatSpin[col_idx[k]];
+    __syncthreads();
+ 
+    // Standard shared-memory tree reduction
+    for (int off = blockDim.x / 2; off; off /= 2) {
+        if (p_Id < off) sh_mem[p_Id] += sh_mem[p_Id + off];
+        __syncthreads();
+    }
+ 
+    if (p_Id == 0) {
+        float dE = -2.0f * (sh_mem[0] + gpuLinTermsVect[vertice_Id]) * current_spin;
+        float acceptance = fminf(1.0f, expf(-beta * dE));
+
+        if (randvals[vertice_Id] < acceptance) {
+            int idx = atomicAdd(num_candidates, 1);
+            candidates[idx].spin_id      = vertice_Id;
+            candidates[idx].delta_energy = dE;
+        }
+    }
+}
 
 __global__ void applySingleFlip(
         signed char*   gpuLatSpin,
