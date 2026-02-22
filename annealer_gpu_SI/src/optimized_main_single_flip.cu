@@ -384,13 +384,14 @@ int main(int argc, char* argv[])
 	 
 	std::cout << "Bin sizes — dense: " << num_dense
 	          << "  sparse: "          << num_sparse << std::endl;
+
+	int h_num_hub = std::min(num_dense, (int)MAX_HUB_SPINS);
 	 
 	if (num_dense > MAX_HUB_SPINS)
 	    std::cerr << "WARNING: more dense spins than MAX_HUB_SPINS ("
 	              << MAX_HUB_SPINS << "). Increase the constant.\n";
 	 
 	// Upload hub indices to __constant__ memory (done once, never changes)
-	int h_num_hub = std::min(num_dense, (int)MAX_HUB_SPINS);
 	cudaMemcpyToSymbol(c_hub_spin_ids,  dense_spins.data(), h_num_hub * sizeof(int));
 	cudaMemcpyToSymbol(c_num_hub_spins, &h_num_hub,         sizeof(int));
 	 
