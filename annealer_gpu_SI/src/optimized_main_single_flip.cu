@@ -126,19 +126,6 @@ __global__ void final_spins_total_energy(
 		float* total_energy
 );
 
-__global__ void collectFlipCandidates(
-        const int*   row_ptr,
-        const int*   col_idx,
-        const float* J_values,
-        float*       gpuLinTermsVect,
-        const float* __restrict__ randvals,
-        signed char* gpuLatSpin,          // single buffer now (read-only here)
-        const unsigned int* gpu_num_spins,
-        const float  beta,
-        FlipCandidate* candidates,        // output: accepted candidates
-        int*           num_candidates     // output: atomic counter
-);
-
 
 __global__ void collectFlipCandidates_dense(
         const int*     row_ptr,
@@ -740,54 +727,6 @@ int main(int argc, char* argv[])
 
 #if CORRECT
 
-__global__ void collectFlipCandidates(
-        const int*   row_ptr,
-        const int*   col_idx,
-        const float* J_values,
-        float*       gpuLinTermsVect,
-        const float* __restrict__ randvals,
-        signed char* gpuLatSpin,          // single buffer now (read-only here)
-        const unsigned int* gpu_num_spins,
-        const float  beta,
-        FlipCandidate* candidates,        // output: accepted candidates
-        int*           num_candidates     // output: atomic counter
-){
-    unsigned int vertice_Id = blockIdx.x;
-    unsigned int p_Id       = threadIdx.x;
-
-    __shared__ float sh_mem[THREADS];
-    sh_mem[p_Id] = 0.0f;
-    __syncthreads();
-
-    float current_spin = (float)gpuLatSpin[vertice_Id];
-
-    int start = row_ptr[vertice_Id];
-    int end   = row_ptr[vertice_Id + 1];
-
-    for (int k = start + p_Id; k < end; k += blockDim.x)
-        sh_mem[p_Id] += J_values[k] * (float)gpuLatSpin[col_idx[k]];
-    __syncthreads();
-
-    for (int off = blockDim.x / 2; off; off /= 2) {
-        if (p_Id < off) sh_mem[p_Id] += sh_mem[p_Id + off];
-        __syncthreads();
-    }
-
-    if (p_Id == 0) {
-        float dE = -2.0f * (sh_mem[0] + gpuLinTermsVect[vertice_Id]) * current_spin;
-
-        float acceptance = fminf(1.0f, expf(-beta * dE));
-
-        if (randvals[vertice_Id] < acceptance) {
-            int idx = atomicAdd(num_candidates, 1);
-            candidates[idx].spin_id      = vertice_Id;
-            candidates[idx].delta_energy = dE;
-        }
-    }
-}
-
-#endif
-
 __global__ void collectFlipCandidates_dense(
         const int*     row_ptr,
         const int*     col_idx,
@@ -833,6 +772,8 @@ __global__ void collectFlipCandidates_dense(
         }
     }
 }
+
+#endif
 
 
 __global__ void collectFlipCandidates_sparse(
