@@ -24,6 +24,22 @@ struct FlipCandidate {
     float  delta_energy;
 };
 
+// ── Bin thresholds ────────────────────────────────────────────────────────
+// Spins with row-length >= DENSE_THRESHOLD  → Bin 0: 1 block / 1024 threads
+// Spins with row-length <  DENSE_THRESHOLD  → Bin 1: 1 warp  / 32  threads
+// packed SPINS_PER_BLOCK_SPARSE at a time into one block of 1024 threads.
+#define DENSE_THRESHOLD         128   // tune after inspecting degree histogram
+#define SPINS_PER_BLOCK_SPARSE   32   // 32 spins × 32 threads = 1024 threads/block
+ 
+// Max hub spins cached in __constant__ memory (compile-time literal)
+#define MAX_HUB_SPINS            16   // safe upper bound given your pattern
+ 
+// Constant-memory cache for hub spin VALUES (refreshed per flip if needed)
+__constant__ signed char c_hub_spin_vals[MAX_HUB_SPINS];
+// Constant-memory: global indices of hub spins (set once at startup)
+__constant__ int 	c_hub_spin_ids[MAX_HUB_SPINS];
+__constant__ int 	c_num_hub_spins;  // actual count (<= MAX_HUB_SPINS)
+
 #include "utils.hpp"
 
 #define CHANGE_MAX_ENERGY 0.0f
