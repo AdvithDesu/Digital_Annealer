@@ -349,10 +349,43 @@ int main(int argc, char* argv[])
 	std::cout << "Sparse J loaded: num_spins = "
 	          << num_spins << ", nnz = " << nnz << std::endl;
 
-    // CPU_THREADS does not seem to be used
-	// unsigned int CPU_THREADS = THREADS;//(num_spins < 32) ? num_spins : 32; 
+	// ── Build spin bins based on row degree ──────────────────────────────────
+	std::vector<int> dense_spins, sparse_spins;
+	dense_spins.reserve(32);
+	sparse_spins.reserve(num_spins);
+	 
+	for (unsigned int i = 0; i < num_spins; i++) {
+	    int degree = row_ptr[i + 1] - row_ptr[i];
+	    if (degree >= DENSE_THRESHOLD)
+	        dense_spins.push_back(i);
+	    else
+	        sparse_spins.push_back(i);
+	}
+	 
+	int num_dense  = (int)dense_spins.size();
+	int num_sparse = (int)sparse_spins.size();
+	 
+	std::cout << "Bin sizes — dense: " << num_dense
+	          << "  sparse: "          << num_sparse << std::endl;
+	 
+	if (num_dense > MAX_HUB_SPINS)
+	    std::cerr << "WARNING: more dense spins than MAX_HUB_SPINS ("
+	              << MAX_HUB_SPINS << "). Increase the constant.\n";
+	 
+	// Upload hub indices to __constant__ memory (done once, never changes)
+	int h_num_hub = std::min(num_dense, (int)MAX_HUB_SPINS);
+	cudaMemcpyToSymbol(c_hub_spin_ids,  dense_spins.data(), h_num_hub * sizeof(int));
+	cudaMemcpyToSymbol(c_num_hub_spins, &h_num_hub,         sizeof(int));
+	 
+	// GPU arrays for bin membership
 
-    // cudaMemcpyToSymbol( &THREADS, &CPU_THREADS, sizeof(unsigned int));
+	int *gpu_dense_ids, *gpu_sparse_ids;
+	gpuErrchk(cudaMalloc((void**)&gpu_dense_ids, num_dense  * sizeof(int)));
+	gpuErrchk(cudaMalloc((void**)&gpu_sparse_ids, num_sparse * sizeof(int)));
+
+	gpuErrchk(cudaMemcpy(gpu_dense_ids,  dense_spins.data(), num_dense  * sizeof(int), cudaMemcpyHostToDevice));
+	gpuErrchk(cudaMemcpy(gpu_sparse_ids, sparse_spins.data(), num_sparse * sizeof(int), cudaMemcpyHostToDevice));
+
 	// Setup cuRAND generator
 
 	curandGenerator_t rng;
