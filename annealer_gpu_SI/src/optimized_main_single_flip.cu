@@ -553,22 +553,43 @@ int main(int argc, char* argv[])
 		
 		    // 2. Reset candidate counter
 		    gpuErrchk(cudaMemset(gpu_num_candidates, 0, sizeof(int)));
-		
-		    // 3. Every spin evaluates its dE and votes; accepted ones enter candidates[]
-		    collectFlipCandidates<<<num_spins, THREADS>>>(
-		        gpu_row_ptr,
-		        gpu_col_idx,
-		        gpu_J_values,
-		        gpuLinTermsVect,
-		        gpu_randvals,
-		        gpu_spins_old,
-		        gpu_num_spins,
-		        (float)beta_schedule[i],
-		        gpu_candidates,
-		        gpu_num_candidates
-		    );
-		    cudaDeviceSynchronize();
-		
+
+			// 3a. Dense bin — one block per hub spin, 1024 threads each
+			if (num_dense > 0) {
+			    collectFlipCandidates_dense<<<num_dense, THREADS>>>(
+			        gpu_row_ptr,
+			        gpu_col_idx,
+			        gpu_J_values,
+			        gpuLinTermsVect,
+			        gpu_randvals,
+			        gpu_spins_old,
+			        (float)beta_schedule[i],
+			        gpu_candidates,
+			        gpu_num_candidates,
+			        gpu_dense_ids
+			    );
+			}
+			 
+			// 3b. Sparse bin — 32 spins per block, one warp per spin
+			if (num_sparse > 0) {
+			    int sparse_blocks = (num_sparse + SPINS_PER_BLOCK_SPARSE - 1) / SPINS_PER_BLOCK_SPARSE;
+			    collectFlipCandidates_sparse<<<sparse_blocks, THREADS>>>(
+			        gpu_row_ptr,
+			        gpu_col_idx,
+			        gpu_J_values,
+			        gpuLinTermsVect,
+			        gpu_randvals,
+			        gpu_spins_old,
+			        (float)beta_schedule[i],
+			        gpu_candidates,
+			        gpu_num_candidates,
+			        gpu_sparse_ids,
+			        num_sparse
+			    );
+			}
+			 
+			cudaDeviceSynchronize();   // single sync covers both kernels
+
 		    // 4. Read candidate count back to host
 		    int h_num_candidates = 0;
 		    gpuErrchk(cudaMemcpy(&h_num_candidates, gpu_num_candidates, sizeof(int), cudaMemcpyDeviceToHost));
