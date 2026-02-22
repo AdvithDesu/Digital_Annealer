@@ -151,7 +151,23 @@ __global__ void collectFlipCandidates_dense(
         FlipCandidate* candidates,
         int*           num_candidates,
         const int*     dense_spin_ids   // maps blockIdx.x → global spin id
-)
+);
+
+
+__global__ void collectFlipCandidates_sparse(
+        const int*     row_ptr,
+        const int*     col_idx,
+        const float*   J_values,
+        float*         gpuLinTermsVect,
+        const float* __restrict__ randvals,
+        signed char*   gpuLatSpin,
+        const float    beta,
+        FlipCandidate* candidates,
+        int*           num_candidates,
+        const int*     sparse_spin_ids,  // logical sparse index → global spin id
+        int            num_sparse
+);
+
 
 __global__ void applySingleFlip(
         signed char*   gpuLatSpin,
@@ -796,6 +812,62 @@ __global__ void collectFlipCandidates_dense(
         }
     }
 }
+
+
+__global__ void collectFlipCandidates_sparse(
+        const int*     row_ptr,
+        const int*     col_idx,
+        const float*   J_values,
+        float*         gpuLinTermsVect,
+        const float* __restrict__ randvals,
+        signed char*   gpuLatSpin,
+        const float    beta,
+        FlipCandidate* candidates,
+        int*           num_candidates,
+        const int*     sparse_spin_ids,  // logical sparse index → global spin id
+        int            num_sparse
+){
+    // Which sparse spin does this warp own?
+    int warp_in_block = threadIdx.x / 32;     // 0 .. SPINS_PER_BLOCK_SPARSE-1
+    int lane          = threadIdx.x & 31;     // 0 .. 31
+ 
+    int sparse_idx = (int)blockIdx.x * SPINS_PER_BLOCK_SPARSE + warp_in_block;
+    if (sparse_idx >= num_sparse) return;
+ 
+    int vertice_Id = sparse_spin_ids[sparse_idx];   // global spin index
+ 
+    float current_spin = (float)gpuLatSpin[vertice_Id];
+ 
+    int start = row_ptr[vertice_Id];
+    int end   = row_ptr[vertice_Id + 1];
+    int len   = end - start;
+ 
+    // ── Warp-strided accumulation ──────────────────────────────
+    float local_sum = 0.0f;
+    for (int k = lane; k < len; k += 32)
+        local_sum += J_values[start + k] * (float)gpuLatSpin[col_idx[start + k]];
+ 
+    // ── Warp-shuffle reduction (no shared mem, no __syncthreads)
+    // GH100: full warp mask, single-cycle shuffle
+    unsigned mask = 0xFFFFFFFFu;
+    local_sum += __shfl_down_sync(mask, local_sum, 16);
+    local_sum += __shfl_down_sync(mask, local_sum,  8);
+    local_sum += __shfl_down_sync(mask, local_sum,  4);
+    local_sum += __shfl_down_sync(mask, local_sum,  2);
+    local_sum += __shfl_down_sync(mask, local_sum,  1);
+    // lane 0 now holds the complete neighbour sum
+ 
+    if (lane == 0) {
+        float dE = -2.0f * (local_sum + gpuLinTermsVect[vertice_Id]) * current_spin;
+        float acceptance = fminf(1.0f, expf(-beta * dE));
+        if (randvals[vertice_Id] < acceptance) {
+            int idx = atomicAdd(num_candidates, 1);
+            candidates[idx].spin_id      = vertice_Id;
+            candidates[idx].delta_energy = dE;
+        }
+    }
+}
+
 
 __global__ void applySingleFlip(
         signed char*   gpuLatSpin,
