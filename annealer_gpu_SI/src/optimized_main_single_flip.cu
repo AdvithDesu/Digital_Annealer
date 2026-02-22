@@ -733,6 +733,9 @@ int main(int argc, char* argv[])
 	cudaFree(devRanStates);
 	cudaFree(gpu_candidates);
 	cudaFree(gpu_num_candidates);
+	cudaFree(gpu_dense_ids);
+	cudaFree(gpu_sparse_ids);
+
 	return 0;
 }
 
