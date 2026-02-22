@@ -557,7 +557,27 @@ int main(int argc, char* argv[])
 		            chosen
 		        );
 		        cudaDeviceSynchronize();
-		
+
+				// Refresh hub values in __constant__ memory if a hub was flipped
+				{
+				    FlipCandidate h_chosen;
+				    gpuErrchk(cudaMemcpy(&h_chosen, gpu_candidates + chosen, sizeof(FlipCandidate),
+				                         cudaMemcpyDeviceToHost));
+				 
+				    bool is_hub = std::find(dense_spins.begin(), dense_spins.end(),
+				                            h_chosen.spin_id) != dense_spins.end();
+				    if (is_hub) {
+				        // Pull updated values for hub slots only (MAX_HUB_SPINS bytes — negligible)
+				        signed char h_hub_vals[MAX_HUB_SPINS];
+				        for (int hh = 0; hh < h_num_hub; hh++) {
+				            gpuErrchk(cudaMemcpy(&h_hub_vals[hh], gpu_spins_old + dense_spins[hh],
+				                                 sizeof(signed char),
+				                                 cudaMemcpyDeviceToHost));
+				        }
+				        cudaMemcpyToSymbol(c_hub_spin_vals, h_hub_vals, h_num_hub * sizeof(signed char));
+				    }
+				}
+
 		        // 7. Read updated energy
 		        gpuErrchk(cudaMemcpy(gpu_total_energy, d_total_energy, sizeof(float), cudaMemcpyDeviceToHost));
 		
