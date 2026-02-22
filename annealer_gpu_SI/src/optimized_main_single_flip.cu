@@ -792,6 +792,16 @@ __global__ void collectFlipCandidates_dense(
 
 #endif
 
+// Binary search to check if a spin_id is a hub and get its constant-memory index
+__device__ __forceinline__ int find_hub_index(int spin_id) {
+    // Linear search is faster than binary for small MAX_HUB_SPINS (16)
+    // If c_num_hub_spins grows large, switch to binary search
+    for (int i = 0; i < c_num_hub_spins; i++) {
+        if (c_hub_spin_ids[i] == spin_id)
+            return i;  // found — return index into c_hub_spin_vals[]
+    }
+    return -1;  // not a hub
+}
 
 __global__ void collectFlipCandidates_sparse(
         const int*     row_ptr,
