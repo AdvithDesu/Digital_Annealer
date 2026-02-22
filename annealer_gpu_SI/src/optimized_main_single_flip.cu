@@ -382,7 +382,7 @@ int main(int argc, char* argv[])
 	int num_dense  = (int)dense_spins.size();
 	int num_sparse = (int)sparse_spins.size();
 	 
-	std::cout << "Bin sizes — dense: " << num_dense
+	std::cout << "Bin sizes (dense): " << num_dense
 	          << "  sparse: "          << num_sparse << std::endl;
 
 	int h_num_hub = std::min(num_dense, (int)MAX_HUB_SPINS);
