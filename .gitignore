@@ -9,3 +9,8 @@ install_manifest.txt
 compile_commands.json
 CTestTestfile.cmake
 _deps
+
+spins_*
+energy_history_*
+__pycache__/
+.DS_Store

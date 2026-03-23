@@ -155,6 +155,10 @@ def run_sa(
     """
     device = spins.device
 
+    if device.type == "mps" and num_sweeps_per_beta > 1:
+        from mps_optim import run_sa_mps
+        return run_sa_mps(spins, h, col_idx, J_values, row_idx, num_spins, beta_schedule, num_sweeps_per_beta, debug)
+
     total_energy = compute_total_energy(
         spins, h, col_idx, J_values, row_idx, num_spins)
     best_energy = total_energy
@@ -163,58 +167,57 @@ def run_sa(
     print(f"Start annealing with initial energy: {total_energy:.6f}")
     t0 = time.perf_counter()
 
-    for i, beta in enumerate(beta_schedule):
-        no_update = 0
+    total_energy_t = torch.tensor(total_energy, dtype=torch.float32, device=device)
+    best_energy_t = torch.tensor(best_energy,  dtype=torch.float32, device=device)
 
+    no_update = 0
+    for i, beta in enumerate(beta_schedule):
         for _ in range(num_sweeps_per_beta):
             # 1. Neighbour sums via CSR gather-multiply-scatter
             neighbor_sums = sparse_neighbor_sums(
                 spins, col_idx, J_values, row_idx, num_spins)
-
             # 2. Delta energy for every possible single-spin flip
             dE = -2.0 * (neighbor_sums + h) * spins
 
             # 3. Metropolis acceptance
-            acceptance = torch.clamp(torch.exp(-beta * dE), max=1.0)
             rand_vals = torch.rand(num_spins, device=device)
-            candidates = torch.where(rand_vals < acceptance)[0]
+            accepted = rand_vals < torch.clamp(torch.exp(-beta * dE), max=1.0)
+            noise = torch.rand(num_spins, device=device)
+            chosen_idx = (accepted.float() * noise).argmax(keepdim=True)
+            was_acc = accepted[chosen_idx]
 
-            if candidates.numel() > 0:
-                # 4. Pick one candidate uniformly at random
-                chosen_local = torch.randint(
-                    candidates.numel(), (1,), device=device)
-                chosen_spin = candidates[chosen_local].item()
-                chosen_dE = dE[chosen_spin].item()
+            spins[chosen_idx] = spins[chosen_idx] * torch.where(
+                was_acc,
+                torch.tensor(-1.0, device=device),
+                torch.tensor(1.0,  device=device),
+            )
+            total_energy_t += (dE[chosen_idx] * was_acc.float()).squeeze()
+            best_energy_t = torch.minimum(best_energy_t, total_energy_t)
 
-                # 5. Flip & update running energy
-                spins[chosen_spin] *= -1
-                total_energy += chosen_dE
+        best_e_py = best_energy_t.item()
+        total_e_py = total_energy_t.item()
+        energy_history.append(best_e_py)
 
-                # 6. Track best
-                if total_energy < best_energy:
-                    best_energy = total_energy
-                    no_update = 0
-                else:
-                    no_update += 1
-
-                # 7. Early stopping
-                if (not disable_early_stop
-                        and no_update > num_sweeps_per_beta):
-                    if debug:
-                        print(f"  Breaking early at temp iteration {i}")
-                    break
-
-        energy_history.append(best_energy)
+        if not disable_early_stop:
+            if best_e_py < best_energy:
+                best_energy = best_e_py
+                no_update = 0
+            else:
+                no_update += 1
+            if no_update > num_sweeps_per_beta:
+                if debug:
+                    print(f"  Breaking early at temp iteration {i}")
+                break
 
         if debug and (i % 100 == 0 or i == len(beta_schedule) - 1):
             print(f"  Iter {i:>5}/{len(beta_schedule)}  "
-                  f"T={1.0/beta:.4f}  E={total_energy:.1f}  "
-                  f"best={best_energy:.1f}")
+                  f"T={1.0/beta:.4f}  E={total_e_py:.1f}  "
+                  f"best={best_e_py:.1f}")
 
     elapsed = time.perf_counter() - t0
     print(f"Total annealing time: {elapsed:.6f} seconds")
 
-    return spins, total_energy, best_energy, energy_history
+    return spins, total_energy_t.item(), best_energy_t.item(), energy_history
 
 
 # ---------------------------------------------------------------------------
@@ -296,6 +299,10 @@ def main():
             f"h vector length ({len(h_np)}) != num_spins ({num_spins})")
 
     t_load = time.perf_counter() - t_load
+
+    if device.type == "mps":
+        from mps_optim import refuse_small
+        device = refuse_small(device, num_spins, args.sweeps_per_beta)
 
     # ---- Move CSR arrays to GPU as flat tensors ----
     t_setup = time.perf_counter()
