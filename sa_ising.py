@@ -276,7 +276,10 @@ def main():
         device = torch.device(args.device)
     print(f"Using device: {device}")
 
+    t_total = time.perf_counter()
+
     # ---- Load CSR arrays ----
+    t_load = time.perf_counter()
     print("Loading sparse J matrix ...")
     row_ptr_np = load_csv_int(args.row_ptr)
     col_idx_np = load_csv_int(args.col_idx)
@@ -292,7 +295,10 @@ def main():
         raise ValueError(
             f"h vector length ({len(h_np)}) != num_spins ({num_spins})")
 
+    t_load = time.perf_counter() - t_load
+
     # ---- Move CSR arrays to GPU as flat tensors ----
+    t_setup = time.perf_counter()
     row_ptr_t = torch.tensor(row_ptr_np, dtype=torch.long, device=device)
     col_idx_t = torch.tensor(col_idx_np, dtype=torch.long, device=device)
     J_values_t = torch.tensor(J_values_np, dtype=torch.float32, device=device)
@@ -313,7 +319,10 @@ def main():
     print(f"Beta schedule: {len(beta_schedule)} steps, "
           f"T: {args.start_temp} -> {args.stop_temp}, alpha = {args.alpha}")
 
+    t_setup = time.perf_counter() - t_setup
+
     # ---- Run SA ----
+    t_anneal = time.perf_counter()
     spins, final_energy, best_energy, energy_history = run_sa(
         spins, h_t, col_idx_t, J_values_t, row_idx_t, num_spins,
         beta_schedule,
@@ -321,6 +330,8 @@ def main():
         disable_early_stop=args.no_early_stop,
         debug=args.debug,
     )
+
+    t_anneal = time.perf_counter() - t_anneal
 
     # ---- Verify energy from scratch ----
     verify_energy = compute_total_energy(
@@ -343,6 +354,13 @@ def main():
         for idx, e in enumerate(energy_history):
             f.write(f"{idx}\t{e:.6f}\n")
     print(f"  Energy history -> {energy_filename}")
+
+    t_total = time.perf_counter() - t_total
+    print(f"\n--- Timing ---")
+    print(f"  Load data:   {t_load:.6f} s")
+    print(f"  Setup (GPU): {t_setup:.6f} s")
+    print(f"  Annealing:   {t_anneal:.6f} s")
+    print(f"  Total:       {t_total:.6f} s")
 
     # ---- Optionally write final spins ----
     if args.debug:
