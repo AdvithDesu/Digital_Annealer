@@ -340,7 +340,11 @@ int main(int argc, char* argv[])
 	    exit(1);
 	}
 
+	auto t_total_start = std::chrono::high_resolution_clock::now();
+
  	double starttime = rtclock();
+
+	auto t_load_start = std::chrono::high_resolution_clock::now();
 
 	// Parse data for CSR representation of J matrix
 	ParseSparseData parseSparse(row_ptr_file, col_idx_file, values_file);
@@ -352,8 +356,11 @@ int main(int argc, char* argv[])
 	//if (linear_file.empty() == false)
     readLinearValues(linear_file, num_spins, linearTermsVect);
 
+	auto t_load_end = std::chrono::high_resolution_clock::now();
+	double t_load = (double)std::chrono::duration_cast<std::chrono::microseconds>(t_load_end - t_load_start).count() * 1e-6;
+
 	double endtime = rtclock();
-  
+
     if(debug)
   	  printtime("ParseData time: ", starttime, endtime);
 
@@ -365,6 +372,8 @@ int main(int argc, char* argv[])
 	
 	std::cout << "Sparse J loaded: num_spins = "
 	          << num_spins << ", nnz = " << nnz << std::endl;
+
+	auto t_setup_start = std::chrono::high_resolution_clock::now();
 
 	// ── Build spin bins based on row degree ──────────────────────────────────
 	std::vector<int> dense_spins, sparse_spins;
@@ -543,6 +552,9 @@ int main(int argc, char* argv[])
 	// We just confirm the device value is in sync before the loop starts.
 	gpuErrchk(cudaMemcpy(d_total_energy, gpu_total_energy, sizeof(float), cudaMemcpyHostToDevice));
 
+	auto t_setup_end = std::chrono::high_resolution_clock::now();
+	double t_setup = (double)std::chrono::duration_cast<std::chrono::microseconds>(t_setup_end - t_setup_start).count() * 1e-6;
+
 	std::cout << "start annealing with initial energy: " << gpu_best_energy[0] << std::endl;
 	std::vector<double> beta_schedule = create_beta_schedule_geometric(num_temps, start_temp, stop_temp, alpha);
 
@@ -681,8 +693,8 @@ int main(int argc, char* argv[])
 	double duration = (double)std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
 
 	auto annealing_end = std::chrono::high_resolution_clock::now();
-	double annealing_duration = (double)std::chrono::duration_cast<std::chrono::microseconds>(annealing_end - annealing_start).count();
-	printf("Total annealing time: %.6f seconds\n", annealing_duration * 1e-6);
+	double t_anneal = (double)std::chrono::duration_cast<std::chrono::microseconds>(annealing_end - annealing_start).count() * 1e-6;
+	printf("Total annealing time: %.6f seconds\n", t_anneal);
 
 	// Write energy history to file for plotting
 	std::string energy_filename = "energy_history_" + run_suffix;
@@ -731,8 +743,16 @@ int main(int argc, char* argv[])
 
 	std::cout << "\t total energy value: " << gpu_total_energy[0] << std::endl;
 	printf("best engy %.1f \n", gpu_best_energy[0]);
-	// std::cout << "\t elapsed time in sec: " << duration * 1e-6 << std::endl;
- 
+
+	auto t_total_end = std::chrono::high_resolution_clock::now();
+	double t_total = (double)std::chrono::duration_cast<std::chrono::microseconds>(t_total_end - t_total_start).count() * 1e-6;
+
+	printf("\n--- Timing ---\n");
+	printf("  Load data:   %.6f s\n", t_load);
+	printf("  Setup (GPU): %.6f s\n", t_setup);
+	printf("  Annealing:   %.6f s\n", t_anneal);
+	printf("  Total:       %.6f s\n", t_total);
+
 	// --------------------------------------------------
 	// Free host-pinned memory
 	// --------------------------------------------------
