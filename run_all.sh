@@ -34,6 +34,10 @@ for jfile in "$DIR"/J_values_*.csv; do
     output=$(python3 "$SCRIPT" -R "$R" -C "$Ci" -V "$V" -l "$H" \
              -x "$X" -y "$Y" -c "$C" -m "$M" --device mps 2>&1)
 
+    # Show which device was used
+    device=$(echo "$output" | grep "Using device:" | awk '{print $3}')
+    echo "  Device: $device"
+
     # Parse timing lines
     t_load=$(echo "$output"   | grep "Load data:"   | awk '{print $3}')
     t_setup=$(echo "$output"  | grep "Setup (GPU):"  | awk '{print $3}')
