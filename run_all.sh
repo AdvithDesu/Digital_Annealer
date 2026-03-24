@@ -6,9 +6,9 @@ DIR="bin_SI"
 OUT="timing_results.txt"
 
 # SA parameters
-X=100.0   # start temp
+X=1000.0   # start temp
 Y=0.1     # final temp
-C=0.95    # cooling rate
+C=0.99    # cooling rate
 M=10      # sweeps per beta
 
 # Header
