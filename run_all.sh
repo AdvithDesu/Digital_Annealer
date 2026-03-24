@@ -32,7 +32,7 @@ for jfile in "$DIR"/J_values_*.csv; do
 
     echo "===== Running N=$N ====="
     output=$(python3 "$SCRIPT" -R "$R" -C "$Ci" -V "$V" -l "$H" \
-             -x "$X" -y "$Y" -c "$C" -m "$M" --device auto 2>&1)
+             -x "$X" -y "$Y" -c "$C" -m "$M" --device mps 2>&1)
 
     # Parse timing lines
     t_load=$(echo "$output"   | grep "Load data:"   | awk '{print $3}')
