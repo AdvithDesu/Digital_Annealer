@@ -24,8 +24,7 @@ struct FlipCandidate {
     float  delta_energy;
 };
 
-// ── Bin thresholds ────────────────────────────────────────────────────────
-// Spins with row-length >= DENSE_THRESHOLD  → Bin 0: 1 block / 1024 threads
+// Bin thresholds // Spins with row-length >= DENSE_THRESHOLD  → Bin 0: 1 block / 1024 threads
 // Spins with row-length <  DENSE_THRESHOLD  → Bin 1: 1 warp  / 32  threads
 // packed SPINS_PER_BLOCK_SPARSE at a time into one block of 1024 threads.
 #define DENSE_THRESHOLD         128   // tune after inspecting degree histogram
@@ -1043,7 +1042,7 @@ __global__ void final_spins_total_energy(
 
 std::vector<double> create_beta_schedule_geometric(
 		uint32_t num_sweeps, 
-		double temp_start, 
+		double temp_start,
 		double temp_end, 
 		double alpha){
 
