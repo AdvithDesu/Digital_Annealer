@@ -155,10 +155,6 @@ def run_sa(
     """
     device = spins.device
 
-    if device.type == "mps" and num_sweeps_per_beta > 1:
-        from mps_optim import run_sa_mps
-        return run_sa_mps(spins, h, col_idx, J_values, row_idx, num_spins, beta_schedule, num_sweeps_per_beta, debug)
-
     total_energy = compute_total_energy(
         spins, h, col_idx, J_values, row_idx, num_spins)
     best_energy = total_energy
@@ -299,10 +295,6 @@ def main():
             f"h vector length ({len(h_np)}) != num_spins ({num_spins})")
 
     t_load = time.perf_counter() - t_load
-
-    if device.type == "mps":
-        from mps_optim import refuse_small
-        device = refuse_small(device, num_spins, args.sweeps_per_beta)
 
     # ---- Move CSR arrays to GPU as flat tensors ----
     t_setup = time.perf_counter()
