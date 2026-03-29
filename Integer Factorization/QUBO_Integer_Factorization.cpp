@@ -365,89 +365,125 @@ bool isSingleVar(const Poly& p, int& outIdx, int64_t& outCoeff) {
     return false;
 }
 
-// Rule 1 & 2: all vars same sign and sum = const matches count -> fix all to 0 or 1
-// Returns map var->value, empty if rule doesn't apply
+// Rule 1 & 2: all terms same sign and sum = const matches count -> fix all to 0 or 1
+// Handles ALL terms (linear and product) as binary-valued.
+// When a product term is determined to be 1, all constituent vars are set to 1.
 std::unordered_map<int,int> applyRule12(const Poly& clause) {
     std::unordered_map<int,int> res;
     if (isZero(clause)) return res;
 
     int64_t constTerm = getConst(clause);
 
-    // collect linear terms only (degree 1)
-    std::vector<std::pair<int,int64_t>> linTerms;
+    // Collect all non-constant terms (any degree)
+    struct TermInfo {
+        Monomial mon;
+        int64_t coeff;
+    };
+    std::vector<TermInfo> allTerms;
     for (auto& [m, c] : clause) {
         if (m.empty()) continue;
-        if (m.size() == 1) linTerms.push_back({m[0], c});
-        else return res;  // has higher degree terms, rule doesn't apply
+        allTerms.push_back({m, c});
     }
 
-    if (linTerms.empty()) return res;
-    int64_t n = (int64_t)linTerms.size();
+    if (allTerms.empty()) return res;
+    int64_t n = (int64_t)allTerms.size();
 
-    // all coeff == -1 and const == n  -> all vars = 1
-    bool allNeg = std::all_of(linTerms.begin(), linTerms.end(), [](auto& p){ return p.second == -1; });
+    // all coeff == -1 and const == n  -> all terms = 1
+    bool allNeg = std::all_of(allTerms.begin(), allTerms.end(), [](auto& t){ return t.coeff == -1; });
     if (allNeg && constTerm == n) {
-        for (auto& [v, c] : linTerms) res[v] = 1;
+        for (auto& t : allTerms) {
+            if (t.mon.size() == 1) res[t.mon[0]] = 1;
+            else { for (int v : t.mon) res[v] = 1; } // product=1 => all vars=1
+        }
         return res;
     }
-    // all coeff == +1 and const == -n -> all vars = 1
-    bool allPos = std::all_of(linTerms.begin(), linTerms.end(), [](auto& p){ return p.second == 1; });
+    // all coeff == +1 and const == -n -> all terms = 1
+    bool allPos = std::all_of(allTerms.begin(), allTerms.end(), [](auto& t){ return t.coeff == 1; });
     if (allPos && constTerm == -n) {
-        for (auto& [v, c] : linTerms) res[v] = 1;
+        for (auto& t : allTerms) {
+            if (t.mon.size() == 1) res[t.mon[0]] = 1;
+            else { for (int v : t.mon) res[v] = 1; }
+        }
         return res;
     }
-    // all coeff == +1 and const == 0  -> all vars = 0
+    // all coeff == +1 and const == 0  -> all terms = 0
+    // For products = 0, we can only set single vars to 0
     if (allPos && constTerm == 0) {
-        for (auto& [v, c] : linTerms) res[v] = 0;
+        for (auto& t : allTerms) {
+            if (t.mon.size() == 1) res[t.mon[0]] = 0;
+            // product=0 means at least one factor is 0, can't determine which
+        }
         return res;
     }
-    // all coeff == -1 and const == 0  -> all vars = 0
+    // all coeff == -1 and const == 0  -> all terms = 0
     if (allNeg && constTerm == 0) {
-        for (auto& [v, c] : linTerms) res[v] = 0;
+        for (auto& t : allTerms) {
+            if (t.mon.size() == 1) res[t.mon[0]] = 0;
+        }
         return res;
     }
     return res;
 }
 
 // Rule 4: coefficient dominance
-// If |c_i| > sum of all other |coefficients| (including const), var is determined
+// Treats ALL terms (linear and product) as binary-valued [0,1].
+// If |c_i| > sum of opposing |coefficients| + const, the term is forced to 0 or 1.
+// Only returns single-variable (degree-1) determinations for substitution.
+// When a product term is forced to 1, all its constituent vars are set to 1.
 std::unordered_map<int,int> applyRule4(const Poly& clause) {
     std::unordered_map<int,int> res;
     if (isZero(clause)) return res;
 
     int64_t constTerm = getConst(clause);
 
-    // collect linear terms only
-    std::vector<std::pair<int,int64_t>> linTerms;
+    // collect ALL non-constant terms (any degree), each binary-valued
+    struct TermInfo {
+        Monomial mon;
+        int64_t coeff;
+    };
+    std::vector<TermInfo> allTerms;
     for (auto& [m, c] : clause) {
         if (m.empty()) continue;
-        if (m.size() == 1) linTerms.push_back({m[0], c});
-        else return res;
+        allTerms.push_back({m, c});
     }
+    if (allTerms.empty()) return res;
 
-    // separate positive and negative
+    // separate positive and negative coefficient sums
     int64_t posSum = 0, negSum = 0;
-    for (auto& [v, c] : linTerms) {
-        if (c > 0) posSum += c;
-        else       negSum += (-c);
+    for (auto& t : allTerms) {
+        if (t.coeff > 0) posSum += t.coeff;
+        else              negSum += (-t.coeff);
     }
 
-    for (auto& [v, c] : linTerms) {
+    for (auto& t : allTerms) {
+        int64_t c = t.coeff;
+        int determined = -1; // -1 = undetermined
         if (c > 0) {
-            if (c > negSum - constTerm) res[v] = 0;
-            if (c > posSum + constTerm) res[v] = 1;
+            if (c > negSum - constTerm) determined = 0;
+            if (c > posSum + constTerm) determined = 1;
         } else {
             int64_t ac = -c;
-            if (ac > posSum + constTerm) res[v] = 0;
-            if (ac > negSum - constTerm) res[v] = 1;
+            if (ac > posSum + constTerm) determined = 0;
+            if (ac > negSum - constTerm) determined = 1;
         }
+        if (determined < 0) continue;
+
+        if (t.mon.size() == 1) {
+            // single variable
+            res[t.mon[0]] = determined;
+        } else if (determined == 1) {
+            // product = 1 means ALL constituent variables must be 1
+            for (int v : t.mon) res[v] = 1;
+        }
+        // product = 0: can't determine which var is 0, skip
     }
     return res;
 }
 
-// Rule 3: clause has exactly 3 linear terms that match x1 + x2 - 2*x3 = 0
-// Returns {var_to_eliminate -> expression} plus mul_ass (simplified here)
-// We try to find s variable to substitute
+// Rule 3: clause matches pattern t1 + t2 - 2*t3 = 0 where t_i are binary-valued terms.
+// The coefficient-2 term must be a single variable (for substitution).
+// The other two terms can be single vars or products.
+// Returns {var_to_eliminate -> expression}
 std::unordered_map<int,Poly> applyRule3(const Poly& clause) {
     std::unordered_map<int,Poly> res;
     if (isZero(clause)) return res;
@@ -455,123 +491,192 @@ std::unordered_map<int,Poly> applyRule3(const Poly& clause) {
     int64_t constTerm = getConst(clause);
     if (constTerm != 0) return res;
 
-    std::vector<std::pair<int,int64_t>> linTerms;
+    // Collect all non-constant terms
+    struct TermInfo {
+        Monomial mon;
+        int64_t coeff;
+    };
+    std::vector<TermInfo> terms;
     for (auto& [m, c] : clause) {
         if (m.empty()) continue;
-        if (m.size() == 1) linTerms.push_back({m[0], c});
-        else return res;
+        terms.push_back({m, c});
     }
-    if (linTerms.size() != 3) return res;
+    if (terms.size() != 3) return res;
 
-    // find the one with coeff +-2
+    // find the one with coeff +-2 (must be degree-1 for substitution)
     int twoIdx = -1;
-    for (int i = 0; i < 3; i++)
-        if (std::abs(linTerms[i].second) == 2) { twoIdx = i; break; }
+    for (int i = 0; i < 3; i++) {
+        if (std::abs(terms[i].coeff) == 2 && terms[i].mon.size() == 1) {
+            twoIdx = i;
+            break;
+        }
+    }
     if (twoIdx < 0) return res;
 
-    int64_t twoSign  = (linTerms[twoIdx].second > 0) ? 1 : -1;
-    int64_t restSign = -twoSign;  // the other two should sum to twoSign * x3
+    int64_t twoSign  = (terms[twoIdx].coeff > 0) ? 1 : -1;
+    int64_t restSign = -twoSign;
 
     // check other two have coeff restSign
     bool ok = true;
     for (int i = 0; i < 3; i++) {
         if (i == twoIdx) continue;
-        if (linTerms[i].second != restSign) { ok = false; break; }
+        if (terms[i].coeff != restSign) { ok = false; break; }
     }
     if (!ok) return res;
 
-    // x1 + x2 = 2*x3 (up to sign)
-    // Substitute x3 = (x1 + x2) / 2  -- not integer, so instead substitute
-    // the s_ variable if present
-    int v3 = linTerms[twoIdx].first;
-    int v1 = linTerms[(twoIdx+1)%3].first;
-    int v2 = linTerms[(twoIdx+2)%3].first;
-
-    // x3 = x1  (since binary, x1=x2=x3 follows)
-    // prefer to eliminate s_ variable
-    std::string n3 = G_vars.name(v3), n1 = G_vars.name(v1), n2 = G_vars.name(v2);
+    // Pattern: t1 + t2 = 2*x3 => x3 = t1 (= t2, all equal for binary)
+    int v3 = terms[twoIdx].mon[0]; // the degree-1 variable with coeff +-2
+    int other1 = (twoIdx + 1) % 3;
+    int other2 = (twoIdx + 2) % 3;
 
     auto hasS = [](const std::string& s){ return s.rfind("s_",0)==0; };
+    std::string n3 = G_vars.name(v3);
+
+    // Build the Poly expression for the substitution target
+    // Prefer to substitute s_ variables
+    // The coefficient-2 variable x3 = t1 (one of the other terms)
+    // Pick the simpler term (prefer degree-1 single vars over products)
+    auto buildTermPoly = [](const TermInfo& t) -> Poly {
+        Poly p;
+        p[t.mon] = 1; // the term itself (coeff is already ±1, we use abs value)
+        return p;
+    };
+
+    // Prefer degree-1 target over product target for cleaner substitution
+    int preferIdx = other1;
+    if (terms[other1].mon.size() > 1 && terms[other2].mon.size() == 1) {
+        preferIdx = other2;
+    }
 
     if (hasS(n3)) {
-        res[v3] = polyVar(v1);  // s = x1 (and x1=x2 implied, but we only do one sub)
-    } else if (hasS(n1)) {
-        res[v1] = polyVar(v3);
-    } else if (hasS(n2)) {
-        res[v2] = polyVar(v3);
+        // Substitute s_ variable with the preferred other term
+        res[v3] = buildTermPoly(terms[preferIdx]);
     } else {
-        res[v3] = polyVar(v1);
+        // The coefficient-2 term is not s_, check if either other term is a single s_ var
+        bool s1 = (terms[other1].mon.size() == 1 && hasS(G_vars.name(terms[other1].mon[0])));
+        bool s2 = (terms[other2].mon.size() == 1 && hasS(G_vars.name(terms[other2].mon[0])));
+
+        if (s1) {
+            // Substitute the s_ variable with the coefficient-2 variable
+            res[terms[other1].mon[0]] = polyVar(v3);
+        } else if (s2) {
+            res[terms[other2].mon[0]] = polyVar(v3);
+        } else if (terms[other1].mon.size() == 1 && terms[other2].mon.size() == 1) {
+            // All three are single variables, no s_ vars
+            // x1 = x2 = x3: substitute one with another
+            res[terms[other1].mon[0]] = polyVar(v3);
+        } else {
+            // Substitute the coefficient-2 var with the preferred term
+            res[v3] = buildTermPoly(terms[preferIdx]);
+        }
     }
     return res;
 }
 
 // Rule 6: two large positive (or negative) terms dominate -> complementary
+// Now handles clauses with higher-degree terms (all terms are binary-valued).
+// Only produces substitutions involving degree-1 (single variable) terms.
 std::unordered_map<int,Poly> applyRule6(const Poly& clause) {
     std::unordered_map<int,Poly> res;
     if (isZero(clause)) return res;
 
     int64_t constTerm = getConst(clause);
-    std::vector<std::pair<int,int64_t>> linTerms;
+
+    // Collect ALL non-constant terms with their coefficients
+    struct TermInfo {
+        Monomial mon;
+        int64_t coeff; // absolute value
+        int origSign;  // +1 or -1
+    };
+
+    std::vector<TermInfo> pos, neg;
     for (auto& [m, c] : clause) {
         if (m.empty()) continue;
-        if (m.size() == 1) linTerms.push_back({m[0], c});
-        else return res;
+        if (c > 0) pos.push_back({m, c, 1});
+        else       neg.push_back({m, -c, -1});
     }
 
-    std::vector<std::pair<int,int64_t>> pos, neg;
-    for (auto& kv : linTerms) {
-        if (kv.second > 0) pos.push_back(kv);
-        else               neg.push_back({kv.first, -kv.second});
-    }
-    std::sort(pos.begin(), pos.end(), [](auto& a, auto& b){ return a.second > b.second; });
-    std::sort(neg.begin(), neg.end(), [](auto& a, auto& b){ return a.second > b.second; });
+    std::sort(pos.begin(), pos.end(), [](auto& a, auto& b){ return a.coeff > b.coeff; });
+    std::sort(neg.begin(), neg.end(), [](auto& a, auto& b){ return a.coeff > b.coeff; });
 
     int64_t posSum = 0, negSum = 0;
-    for (auto& kv : pos) posSum += kv.second;
-    for (auto& kv : neg) negSum += kv.second;
+    for (auto& t : pos) posSum += t.coeff;
+    for (auto& t : neg) negSum += t.coeff;
 
     auto hasS = [](const std::string& s){ return s.rfind("s_",0)==0; };
 
-    // positive dominance case
+    // positive dominance case: two largest positive terms are complementary
     if (posSum > negSum - constTerm && constTerm < 0 && pos.size() >= 2) {
-        int64_t cy = pos[0].second, cx = pos[1].second;
-        if (cy + cx > negSum - constTerm && -constTerm - posSum + cy + cx > 0) {
-            int vy = pos[0].first, vx = pos[1].first;
-            // y = 1 - x
-            Poly oneMinusX = polyAdd(polyConst(1), polyScale(polyVar(vx), -1));
-            if (hasS(G_vars.name(vy)))
-                res[vy] = oneMinusX;
-            else
-                res[vy] = oneMinusX;
+        for (size_t i = 0; i < pos.size(); i++) {
+            for (size_t j = i + 1; j < pos.size(); j++) {
+                int64_t cy = pos[i].coeff, cx = pos[j].coeff;
+                if (cy + cx > negSum - constTerm && -constTerm - posSum + cy + cx > 0) {
+                    // These two terms are complementary. Only substitute if both are degree-1.
+                    if (pos[i].mon.size() == 1 && pos[j].mon.size() == 1) {
+                        int vy = pos[i].mon[0], vx = pos[j].mon[0];
+                        Poly oneMinusX = polyAdd(polyConst(1), polyScale(polyVar(vx), -1));
+                        if (hasS(G_vars.name(vy)))
+                            res[vy] = oneMinusX;
+                        else if (hasS(G_vars.name(vx)))
+                            res[vx] = polyAdd(polyConst(1), polyScale(polyVar(vy), -1));
+                        else
+                            res[vy] = oneMinusX;
+                        return res;
+                    }
+                } else {
+                    break; // smaller pairs won't satisfy either
+                }
+            }
         }
     }
+
     // negative dominance case
     if (negSum > posSum + constTerm && constTerm > 0 && neg.size() >= 2) {
-        int64_t cy = neg[0].second, cx = neg[1].second;
-        if (cy + cx > posSum + constTerm && negSum - constTerm - cy - cx < 0) {
-            int vy = neg[0].first, vx = neg[1].first;
-            Poly oneMinusX = polyAdd(polyConst(1), polyScale(polyVar(vx), -1));
-            if (hasS(G_vars.name(vy)))
-                res[vy] = oneMinusX;
-            else
-                res[vy] = oneMinusX;
+        for (size_t i = 0; i < neg.size(); i++) {
+            for (size_t j = i + 1; j < neg.size(); j++) {
+                int64_t cy = neg[i].coeff, cx = neg[j].coeff;
+                if (cy + cx > posSum + constTerm && negSum - constTerm - cy - cx < 0) {
+                    if (neg[i].mon.size() == 1 && neg[j].mon.size() == 1) {
+                        int vy = neg[i].mon[0], vx = neg[j].mon[0];
+                        Poly oneMinusX = polyAdd(polyConst(1), polyScale(polyVar(vx), -1));
+                        if (hasS(G_vars.name(vy)))
+                            res[vy] = oneMinusX;
+                        else if (hasS(G_vars.name(vx)))
+                            res[vx] = polyAdd(polyConst(1), polyScale(polyVar(vy), -1));
+                        else
+                            res[vy] = oneMinusX;
+                        return res;
+                    }
+                } else {
+                    break;
+                }
+            }
         }
     }
     return res;
 }
 
-// Parity rule: find pairs of degree-1 terms with odd coefficients
+// Parity rule: find pairs of degree-1 terms with odd coefficients.
+// IMPORTANT: If ANY higher-degree term has an odd coefficient, the parity
+// analysis on degree-1 terms alone is invalid, so we must skip.
 std::unordered_map<int,Poly> applyParityRule(const Poly& clause) {
     std::unordered_map<int,Poly> res;
     if (isZero(clause)) return res;
+
+    // Check if any higher-degree term has an odd coefficient
+    // If so, parity analysis on degree-1 terms alone is incorrect
+    for (auto& [m, c] : clause) {
+        if (m.size() > 1 && (std::abs(c) % 2 != 0))
+            return res; // can't apply parity rule safely
+    }
 
     std::vector<std::pair<int,int64_t>> oddTerms;
     for (auto& [m, c] : clause) {
         if (m.empty()) continue;
         if (m.size() == 1 && (std::abs(c) % 2 != 0))
-            oddTerms.push_back({m[0], (c % 2 + 2) % 2});  // reduce to +1
+            oddTerms.push_back({m[0], ((c % 2) + 2) % 2});  // reduce to +1
     }
-    int64_t oddConst = (int64_t)(getConst(clause) % 2);
+    int64_t oddConst = getConst(clause) % 2;
     if (oddConst < 0) oddConst += 2;
 
     if (oddTerms.size() == 2) {
@@ -772,9 +877,14 @@ int newAuxVar(const std::string& prefix) {
 
 // The QUBO is built directly from squaring polynomials.
 // For binary vars: x*x = x.  Our mulMon already handles this.
+//
+// Quadratization uses exact reduction formulas from the paper:
+//   Positive coeff a>0:  a*x1*x2*x3 = min_w a*(w*x3 + x1*x2 - x1*w - x2*w + w)  (eq 9)
+//   Negative coeff a<0: -|a|*x1*x2*x3 = min_w -|a|*w*(x1+x2+x3-2)                (eq 11)
+//   Positive 4th degree: needs 2 auxiliary vars (recursive application)
+//   Negative 4th degree: -|a|*x1*x2*x3*x4 = min_w -|a|*w*(x1+x2+x3+x4-3)
 QUBODict buildQUBO(const std::vector<Poly>& clauses, double& offset) {
     // First, collect all monomials from H = sum clause^2
-    // We expand clause^2 and accumulate into a single Poly
     Poly H;
     for (auto& clause : clauses) {
         if (isZero(clause)) continue;
@@ -782,62 +892,103 @@ QUBODict buildQUBO(const std::vector<Poly>& clauses, double& offset) {
         for (auto& [m, c] : sq) addTerm(H, m, c);
     }
 
-    // Now H is a polynomial in binary variables.
-    // Degree > 2 terms need quadratization.
-    // We apply simple substitution: for a degree-3 monomial xyz, introduce w=xy (penalty: w(w-1) = 0 for binary... but we use QUBO penalty)
-    // Simple iterative approach: find any monomial of degree > 2, reduce it.
+    // Collect degree-3 and degree-4 terms, group by unique variable sets
+    // (like the Python quadrizate function)
+    std::map<Monomial, int64_t> cubicTerms;   // 3-variable monomials
+    std::map<Monomial, int64_t> quarticTerms; // 4-variable monomials
+    Poly quadraticH; // degree <= 2 terms kept as-is
 
-    // Quadratize: replace each degree-3+ monomial with auxiliary vars
-    // We repeatedly reduce until all monomials are degree <= 2.
-    bool reduced = false;
-    int quadIter = 0;
-    while (!reduced && quadIter < 10000) {
-        reduced = true;
-        quadIter++;
-        Poly newH;
-        for (auto& [m, c] : H) {
-            if (m.size() <= 2) {
-                addTerm(newH, m, c);
-                continue;
-            }
-            reduced = false;
-            // take first two vars in monomial
-            int va = m[0], vb = m[1];
-            // introduce w = va * vb
-            // find or create auxiliary
-            std::string aname = "w_" + G_vars.name(va) + "_" + G_vars.name(vb);
-            int w = G_vars.get(aname);
-
-            // replace va*vb with w in this monomial
-            Monomial newM;
-            newM.push_back(w);
-            for (int i = 2; i < (int)m.size(); i++) newM.push_back(m[i]);
-            std::sort(newM.begin(), newM.end());
-            addTerm(newH, newM, c);
-
-            // Add penalty: lambda*(w - 2*w*va - 2*w*vb + va*vb + 3*w)
-            // Standard QUBO penalty for w = va*vb:
-            // P = lambda * (3w + va*vb - 2*w*va - 2*w*vb)
-            // We pick lambda = |c| + 1 to dominate
-            int64_t lam = std::abs(c) + 1;
-            addTerm(newH, {w},        3 * lam);
-            addTerm(newH, {va, vb},   lam);
-            addTerm(newH, {w, va},   -2 * lam);
-            addTerm(newH, {w, vb},   -2 * lam);
+    for (auto& [m, c] : H) {
+        if (m.size() <= 2) {
+            addTerm(quadraticH, m, c);
+        } else if (m.size() == 3) {
+            cubicTerms[m] += c;
+        } else if (m.size() == 4) {
+            quarticTerms[m] += c;
         }
-        H = newH;
+        // degree > 4 shouldn't occur from squaring degree-2 clauses
     }
 
-    // Now convert to QUBO dict (upper triangular)
+    // Apply exact quadratization for cubic terms
+    for (auto& [m, coeff] : cubicTerms) {
+        if (coeff == 0) continue;
+        int a = m[0], b = m[1], c_var = m[2];
+        std::string wname = "w_" + std::to_string(g_auxCounter++);
+        int w = G_vars.get(wname);
+
+        if (coeff > 0) {
+            // Positive: a*x1*x2*x3 = min_w a*(w*x3 + x1*x2 - x1*w - x2*w + w)
+            addTerm(quadraticH, {w, c_var},  coeff);   // w*x3
+            addTerm(quadraticH, {a, b},      coeff);   // x1*x2
+            addTerm(quadraticH, {a, w},     -coeff);   // -x1*w
+            addTerm(quadraticH, {b, w},     -coeff);   // -x2*w
+            addTerm(quadraticH, {w},         coeff);   // w
+        } else {
+            // Negative: coeff*x1*x2*x3 = min_w |coeff|*(-w*(x1+x2+x3-2))
+            //         = min_w |coeff|*(-w*x1 - w*x2 - w*x3 + 2*w)
+            int64_t absC = -coeff;
+            addTerm(quadraticH, {w, a},     -absC);    // -w*x1
+            addTerm(quadraticH, {w, b},     -absC);    // -w*x2
+            addTerm(quadraticH, {w, c_var}, -absC);    // -w*x3
+            addTerm(quadraticH, {w},         2*absC);  // 2*w
+        }
+    }
+
+    // Apply exact quadratization for quartic terms
+    for (auto& [m, coeff] : quarticTerms) {
+        if (coeff == 0) continue;
+        int a = m[0], b = m[1], c_var = m[2], d = m[3];
+
+        if (coeff > 0) {
+            // Positive 4th degree: use 2 aux vars (recursive from paper sec 4.2)
+            // x1*x2*x3*x4 = min_{w,z} (z*x4 + w*x3 - z*w - z*x3 + z + x1*x2 - w*x1 - w*x2 + w)
+            std::string wname = "w_" + std::to_string(g_auxCounter++);
+            std::string zname = "w_" + std::to_string(g_auxCounter++);
+            int w = G_vars.get(wname);
+            int z = G_vars.get(zname);
+
+            addTerm(quadraticH, {z, d},      coeff);   // z*x4
+            addTerm(quadraticH, {w, c_var},  coeff);   // w*x3
+            addTerm(quadraticH, {z, w},     -coeff);   // -z*w
+            addTerm(quadraticH, {z, c_var}, -coeff);   // -z*x3
+            addTerm(quadraticH, {z},         coeff);   // z
+            addTerm(quadraticH, {a, b},      coeff);   // x1*x2
+            addTerm(quadraticH, {w, a},     -coeff);   // -w*x1
+            addTerm(quadraticH, {w, b},     -coeff);   // -w*x2
+            addTerm(quadraticH, {w},         coeff);   // w
+        } else {
+            // Negative 4th degree: -|a|*x1*x2*x3*x4 = min_w -|a|*w*(x1+x2+x3+x4-3)
+            std::string wname = "w_" + std::to_string(g_auxCounter++);
+            int w = G_vars.get(wname);
+            int64_t absC = -coeff;
+
+            addTerm(quadraticH, {w, a},     -absC);    // -w*x1
+            addTerm(quadraticH, {w, b},     -absC);    // -w*x2
+            addTerm(quadraticH, {w, c_var}, -absC);    // -w*x3
+            addTerm(quadraticH, {w, d},     -absC);    // -w*x4
+            addTerm(quadraticH, {w},         3*absC);  // 3*w
+        }
+    }
+
+    // Verify all terms are degree <= 2
+    for (auto& [m, c] : quadraticH) {
+        if (m.size() > 2) {
+            // This shouldn't happen for factorization (max degree 4 from squaring)
+            std::cerr << "WARNING: degree-" << m.size() << " term after quadratization: ";
+            for (int v : m) std::cerr << G_vars.name(v) << "*";
+            std::cerr << " coeff=" << c << "\n";
+        }
+    }
+
+    // Convert to QUBO dict (upper triangular)
     QUBODict Q;
     offset = 0.0;
-    for (auto& [m, c] : H) {
+    for (auto& [m, c] : quadraticH) {
         if (m.empty()) { offset += (double)c; continue; }
         if (m.size() == 1) {
             auto key = std::make_pair(m[0], m[0]);
             Q[key] += (double)c;
-        } else {
-            // degree 2
+        } else if (m.size() == 2) {
             int i = m[0], j = m[1];
             if (i > j) std::swap(i, j);
             auto key = std::make_pair(i, j);
