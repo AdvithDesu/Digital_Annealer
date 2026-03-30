@@ -1102,6 +1102,107 @@ void saveExpressionConstraints(const std::string& filename,
 }
 
 // ============================================================
+// Post-processing: given a QUBO solution vector (0/1 per variable),
+// reconstruct the factors P and Q using stored constraints.
+// ============================================================
+void postProcess(const std::vector<int>& quboSolution,
+                 uint64_t N, int n_p, int n_q,
+                 const SimplifierResult& sr,
+                 const std::vector<std::string>& activeVarNames)
+{
+    std::map<std::string, int64_t> fullAssign;
+
+    // 1. Assignment constraints from preprocessing
+    for (auto& [nm, val] : sr.assignmentConstraints)
+        fullAssign[nm] = val;
+
+    // 2. QUBO solution bits
+    for (int i = 0; i < (int)quboSolution.size(); i++)
+        fullAssign[activeVarNames[i]] = quboSolution[i];
+
+    // 3. Expression constraint resolution (pass 1)
+    //    Iteratively substitute known values into expressions until no progress.
+    int maxPasses = (int)sr.expressionConstraints.size() + 5;
+    for (int pass = 0; pass < maxPasses; pass++) {
+        bool changed = false;
+        for (auto& [nm, expr] : sr.expressionConstraints) {
+            if (fullAssign.count(nm)) continue;
+            Poly p = expr;
+            for (auto& [k, v] : fullAssign) {
+                auto it = G_vars.nameToIdx.find(k);
+                if (it != G_vars.nameToIdx.end())
+                    p = polySub1(p, it->second, (int)v);
+            }
+            if (freeVars(p).empty()) {
+                fullAssign[nm] = getConst(p);
+                changed = true;
+            }
+        }
+        if (!changed) break;
+    }
+
+    // 4. Free variable fallback: assign 1 to any unresolved p_i / q_i.
+    //    This handles variables that were substituted out during preprocessing
+    //    and only appear on the RHS of expression constraints.
+    for (int i = 0; i < n_p; i++) {
+        auto key = "p_" + std::to_string(i);
+        if (!fullAssign.count(key)) fullAssign[key] = 1;
+    }
+    for (int i = 0; i < n_q; i++) {
+        auto key = "q_" + std::to_string(i);
+        if (!fullAssign.count(key)) fullAssign[key] = 1;
+    }
+
+    // 5. Expression constraint resolution (pass 2)
+    //    Re-resolve now that fallback values have been assigned.
+    for (int pass = 0; pass < maxPasses; pass++) {
+        bool changed = false;
+        for (auto& [nm, expr] : sr.expressionConstraints) {
+            Poly p = expr;
+            for (auto& [k, v] : fullAssign) {
+                auto it = G_vars.nameToIdx.find(k);
+                if (it != G_vars.nameToIdx.end())
+                    p = polySub1(p, it->second, (int)v);
+            }
+            if (freeVars(p).empty()) {
+                int64_t resolved = getConst(p);
+                if (!fullAssign.count(nm) || fullAssign[nm] != resolved) {
+                    fullAssign[nm] = resolved;
+                    changed = true;
+                }
+            }
+        }
+        if (!changed) break;
+    }
+
+    // 6. Fixed bits guarantee
+    fullAssign["p_0"] = 1;
+    fullAssign["p_" + std::to_string(n_p - 1)] = 1;
+    fullAssign["q_0"] = 1;
+    fullAssign["q_" + std::to_string(n_q - 1)] = 1;
+
+    // 7. Reconstruct P and Q
+    uint64_t P = 0, Q = 0;
+    for (int i = 0; i < n_p; i++) {
+        auto key = "p_" + std::to_string(i);
+        if (fullAssign.count(key))
+            P += (uint64_t)fullAssign[key] * (1ULL << i);
+    }
+    for (int i = 0; i < n_q; i++) {
+        auto key = "q_" + std::to_string(i);
+        if (fullAssign.count(key))
+            Q += (uint64_t)fullAssign[key] * (1ULL << i);
+    }
+
+    // 8. Verify
+    std::cout << "\nFactors of " << N << ": P = " << P << ", Q = " << Q << "\n";
+    if (P * Q == N)
+        std::cout << "Verification: " << P << " * " << Q << " = " << P * Q << " (CORRECT)\n";
+    else
+        std::cout << "Verification: " << P << " * " << Q << " = " << P * Q << " (INCORRECT, expected " << N << ")\n";
+}
+
+// ============================================================
 // Main
 // ============================================================
 int main(int argc, char* argv[]) {
@@ -1192,5 +1293,15 @@ int main(int argc, char* argv[]) {
     }
 
     std::cout << "\nDone. Output files written with prefix *_" << Nstr << ".*\n";
+
+    // Auto-verify when preprocessing fully solved the problem
+    if (numVars == 0) {
+        std::cout << "\n=== Verification (fully solved by preprocessing) ===\n";
+        postProcess({}, N, pv.n_p, pv.n_q, sr, {});
+    } else {
+        std::cout << "\n[QUBO has " << numVars << " variables. "
+                  << "Call postProcess() with the annealer's solution to recover P and Q.]\n";
+    }
+
     return 0;
 }
