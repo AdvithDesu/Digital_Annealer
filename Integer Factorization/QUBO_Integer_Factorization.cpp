@@ -1203,15 +1203,36 @@ void postProcess(const std::vector<int>& quboSolution,
 }
 
 // ============================================================
+// Read Ising spins file (tab-separated +1/-1 on first line)
+// and convert to QUBO binary (0/1).
+// ============================================================
+std::vector<int> readSpinsFile(const std::string& filename) {
+    std::ifstream f(filename);
+    if (!f.is_open())
+        throw std::runtime_error("Cannot open spins file: " + filename);
+    std::string line;
+    std::getline(f, line);
+    std::istringstream iss(line);
+    std::vector<int> quboSol;
+    int spin;
+    while (iss >> spin)
+        quboSol.push_back((spin + 1) / 2);  // +1 -> 1, -1 -> 0
+    return quboSol;
+}
+
+// ============================================================
 // Main
 // ============================================================
 int main(int argc, char* argv[]) {
     if (argc < 2) {
-        std::cerr << "Usage: " << argv[0] << " <N>\n";
+        std::cerr << "Usage: " << argv[0] << " <N> [spins_file]\n";
+        std::cerr << "  Without spins_file: generate QUBO and save CSR files.\n";
+        std::cerr << "  With spins_file:    generate QUBO, then post-process the annealer solution.\n";
         return 1;
     }
 
     uint64_t N = std::stoull(argv[1]);
+    std::string spinsFile = (argc >= 3) ? argv[2] : "";
 
     auto t0 = std::chrono::high_resolution_clock::now();
 
@@ -1294,13 +1315,22 @@ int main(int argc, char* argv[]) {
 
     std::cout << "\nDone. Output files written with prefix *_" << Nstr << ".*\n";
 
-    // Auto-verify when preprocessing fully solved the problem
+    // Post-processing
     if (numVars == 0) {
         std::cout << "\n=== Verification (fully solved by preprocessing) ===\n";
         postProcess({}, N, pv.n_p, pv.n_q, sr, {});
+    } else if (!spinsFile.empty()) {
+        std::cout << "\n=== Post-processing with spins from: " << spinsFile << " ===\n";
+        std::vector<int> quboSol = readSpinsFile(spinsFile);
+        if ((int)quboSol.size() != numVars) {
+            std::cerr << "ERROR: spins file has " << quboSol.size()
+                      << " values but QUBO has " << numVars << " variables.\n";
+            return 1;
+        }
+        postProcess(quboSol, N, pv.n_p, pv.n_q, sr, activeVarNames);
     } else {
         std::cout << "\n[QUBO has " << numVars << " variables. "
-                  << "Call postProcess() with the annealer's solution to recover P and Q.]\n";
+                  << "Re-run with spins file: " << argv[0] << " " << N << " spins_" << Nstr << "]\n";
     }
 
     return 0;
