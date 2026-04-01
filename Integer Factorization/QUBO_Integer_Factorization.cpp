@@ -45,6 +45,54 @@
 #include <vector>
 
 // ============================================================
+// 128-bit unsigned integer support
+// ============================================================
+using uint128_t = __uint128_t;
+
+std::string uint128ToString(uint128_t n) {
+    if (n == 0) return "0";
+    std::string s;
+    while (n > 0) {
+        s += '0' + (char)(n % 10);
+        n /= 10;
+    }
+    std::reverse(s.begin(), s.end());
+    return s;
+}
+
+uint128_t parseUint128(const std::string& s) {
+    uint128_t result = 0;
+    for (char c : s) {
+        if (c < '0' || c > '9') break;
+        result = result * 10 + (c - '0');
+    }
+    return result;
+}
+
+std::ostream& operator<<(std::ostream& os, uint128_t n) {
+    return os << uint128ToString(n);
+}
+
+int bitLen128(uint128_t n) {
+    if (n == 0) return 0;
+    int bits = 0;
+    while (n > 0) { n >>= 1; bits++; }
+    return bits;
+}
+
+// Accurate log2 for 128-bit integers (uses top 53 bits for precision)
+double approxLog2_128(uint128_t n) {
+    if (n == 0) return -1.0;
+    int b = bitLen128(n);
+    if (b <= 53) {
+        return std::log2((double)(uint64_t)n);
+    }
+    int shift = b - 53;
+    double top = (double)(uint64_t)(n >> shift);
+    return (double)shift + std::log2(top);
+}
+
+// ============================================================
 // Variable registry  (string name <-> int index)
 // ============================================================
 struct VarRegistry {
@@ -258,10 +306,10 @@ struct ProblemVars {
     std::map<std::pair<int,int>, Poly> s;  // (from_col, to_col) -> Poly
 };
 
-ProblemVars initializeVariables(uint64_t N) {
+ProblemVars initializeVariables(uint128_t N) {
     ProblemVars pv;
-    int n_m = (int)std::ceil(std::log2((double)N + 1));
-    pv.n_q  = (int)std::ceil(0.5 * std::log2((double)N));
+    int n_m = bitLen128(N);
+    pv.n_q  = (int)std::ceil(approxLog2_128(N) / 2.0);
     pv.n_p  = pv.n_q;
 
     std::cout << "Factoring N = " << N << " (" << n_m << " bits)\n";
@@ -306,7 +354,7 @@ ProblemVars initializeVariables(uint64_t N) {
 // ============================================================
 // Generate column clauses
 // ============================================================
-std::vector<Poly> generateColumnClauses(uint64_t N, const ProblemVars& pv) {
+std::vector<Poly> generateColumnClauses(uint128_t N, const ProblemVars& pv) {
     int n_m = pv.n_p + pv.n_q;
     // get bits of N, LSB first
     std::vector<int> Nbits(n_m, 0);
@@ -1106,7 +1154,7 @@ void saveExpressionConstraints(const std::string& filename,
 // reconstruct the factors P and Q using stored constraints.
 // ============================================================
 void postProcess(const std::vector<int>& quboSolution,
-                 uint64_t N, int n_p, int n_q,
+                 uint128_t N, int n_p, int n_q,
                  const SimplifierResult& sr,
                  const std::vector<std::string>& activeVarNames)
 {
@@ -1182,16 +1230,16 @@ void postProcess(const std::vector<int>& quboSolution,
     fullAssign["q_" + std::to_string(n_q - 1)] = 1;
 
     // 7. Reconstruct P and Q
-    uint64_t P = 0, Q = 0;
+    uint128_t P = 0, Q = 0;
     for (int i = 0; i < n_p; i++) {
         auto key = "p_" + std::to_string(i);
         if (fullAssign.count(key))
-            P += (uint64_t)fullAssign[key] * (1ULL << i);
+            P += (uint128_t)fullAssign[key] * ((uint128_t)1 << i);
     }
     for (int i = 0; i < n_q; i++) {
         auto key = "q_" + std::to_string(i);
         if (fullAssign.count(key))
-            Q += (uint64_t)fullAssign[key] * (1ULL << i);
+            Q += (uint128_t)fullAssign[key] * ((uint128_t)1 << i);
     }
 
     // 8. Verify
@@ -1231,7 +1279,7 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    uint64_t N = std::stoull(argv[1]);
+    uint128_t N = parseUint128(argv[1]);
     std::string spinsFile = (argc >= 3) ? argv[2] : "";
 
     auto t0 = std::chrono::high_resolution_clock::now();
@@ -1295,7 +1343,7 @@ int main(int argc, char* argv[]) {
     std::cout << "Total construction time: " << elapsed << " seconds\n";
 
     // Step 6: save outputs
-    std::string Nstr = std::to_string(N);
+    std::string Nstr = uint128ToString(N);
     saveCSV("row_ptr_" + Nstr + ".csv",    ising.row_ptr);
     saveCSV("col_idx_" + Nstr + ".csv",    ising.col_idx);
     saveCSV("J_values_" + Nstr + ".csv",   ising.values);
