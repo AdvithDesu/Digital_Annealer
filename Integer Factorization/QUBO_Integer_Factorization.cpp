@@ -48,6 +48,25 @@
 // 128-bit unsigned integer support
 // ============================================================
 using uint128_t = __uint128_t;
+using int128_t  = __int128_t;
+
+// Signed 128-bit helpers
+std::string int128ToString(int128_t n) {
+    if (n == 0) return "0";
+    std::string s;
+    bool neg = (n < 0);
+    uint128_t u = neg ? (uint128_t)(-n) : (uint128_t)n;
+    while (u > 0) { s += '0' + (char)(u % 10); u /= 10; }
+    if (neg) s += '-';
+    std::reverse(s.begin(), s.end());
+    return s;
+}
+
+std::ostream& operator<<(std::ostream& os, int128_t n) {
+    return os << int128ToString(n);
+}
+
+int128_t abs128(int128_t x) { return x < 0 ? -x : x; }
 
 std::string uint128ToString(uint128_t n) {
     if (n == 0) return "0";
@@ -127,14 +146,14 @@ struct MonomialHash {
 };
 
 // ============================================================
-// Polynomial = map from Monomial -> int64_t coefficient
+// Polynomial = map from Monomial -> int128_t coefficient
 // ============================================================
-using Poly = std::unordered_map<Monomial, int64_t, MonomialHash>;
+using Poly = std::unordered_map<Monomial, int128_t, MonomialHash>;
 
 // --- helpers ---
 static const Monomial CONST_MON = {};  // empty = constant term
 
-Poly polyConst(int64_t c) {
+Poly polyConst(int128_t c) {
     if (c == 0) return {};
     return {{CONST_MON, c}};
 }
@@ -150,7 +169,7 @@ Monomial mulMon(const Monomial& a, const Monomial& b) {
     return res;
 }
 
-void addTerm(Poly& p, const Monomial& m, int64_t c) {
+void addTerm(Poly& p, const Monomial& m, int128_t c) {
     if (c == 0) return;
     p[m] += c;
     if (p[m] == 0) p.erase(m);
@@ -168,7 +187,7 @@ Poly polySub(const Poly& a, const Poly& b) {
     return res;
 }
 
-Poly polyScale(const Poly& a, int64_t s) {
+Poly polyScale(const Poly& a, int128_t s) {
     if (s == 0) return {};
     Poly res;
     for (auto& [m, c] : a) res[m] = c * s;
@@ -227,12 +246,12 @@ Poly polySubExpr(const Poly& p, int idx, const Poly& expr) {
 // This is a no-op here but kept for clarity.
 Poly applyPowerRule(const Poly& p) { return p; }
 
-int64_t getConst(const Poly& p) {
+int128_t getConst(const Poly& p) {
     auto it = p.find(CONST_MON);
     return it != p.end() ? it->second : 0;
 }
 
-int64_t getCoeff(const Poly& p, int idx) {
+int128_t getCoeff(const Poly& p, int idx) {
     Monomial m = {idx};
     auto it = p.find(m);
     return it != p.end() ? it->second : 0;
@@ -240,19 +259,19 @@ int64_t getCoeff(const Poly& p, int idx) {
 
 bool isZero(const Poly& p) { return p.empty(); }
 
-int64_t gcdAbs(int64_t a, int64_t b) {
-    a = std::abs(a); b = std::abs(b);
+int128_t gcdAbs(int128_t a, int128_t b) {
+    a = abs128(a); b = abs128(b);
     while (b) { a %= b; std::swap(a, b); }
     return a ? a : 1;
 }
 
-int64_t polyGCD(const Poly& p) {
-    int64_t g = 0;
+int128_t polyGCD(const Poly& p) {
+    int128_t g = 0;
     for (auto& [m, c] : p) g = gcdAbs(g, c);
     return g == 0 ? 1 : g;
 }
 
-Poly polyDivideConst(const Poly& p, int64_t d) {
+Poly polyDivideConst(const Poly& p, int128_t d) {
     Poly res;
     for (auto& [m, c] : p) res[m] = c / d;
     return res;
@@ -272,7 +291,7 @@ std::string polyStr(const Poly& p) {
     std::string s;
     for (auto& [m, c] : p) {
         if (!s.empty()) s += " + ";
-        s += std::to_string(c);
+        s += int128ToString(c);
         for (int v : m) s += "*" + G_vars.name(v);
     }
     return s;
@@ -388,7 +407,7 @@ std::vector<Poly> generateColumnClauses(uint128_t N, const ProblemVars& pv) {
         for (int j = 1; ; j++) {
             auto it = pv.s.find({i, i + j});
             if (it == pv.s.end() || isZero(it->second)) break;
-            int64_t scale = (int64_t)1 << j;
+            int128_t scale = (int128_t)1 << j;
             clause = polyAdd(clause, polyScale(it->second, scale));
         }
 
@@ -402,7 +421,7 @@ std::vector<Poly> generateColumnClauses(uint128_t N, const ProblemVars& pv) {
 // ============================================================
 
 // Helper: is this Poly a single variable (degree-1 monomial with coeff +-1)?
-bool isSingleVar(const Poly& p, int& outIdx, int64_t& outCoeff) {
+bool isSingleVar(const Poly& p, int& outIdx, int128_t& outCoeff) {
     if (p.size() != 1) return false;
     auto& [m, c] = *p.begin();
     if (m.size() == 1 && (c == 1 || c == -1)) {
@@ -420,12 +439,12 @@ std::unordered_map<int,int> applyRule12(const Poly& clause) {
     std::unordered_map<int,int> res;
     if (isZero(clause)) return res;
 
-    int64_t constTerm = getConst(clause);
+    int128_t constTerm = getConst(clause);
 
     // Collect all non-constant terms (any degree)
     struct TermInfo {
         Monomial mon;
-        int64_t coeff;
+        int128_t coeff;
     };
     std::vector<TermInfo> allTerms;
     for (auto& [m, c] : clause) {
@@ -434,7 +453,7 @@ std::unordered_map<int,int> applyRule12(const Poly& clause) {
     }
 
     if (allTerms.empty()) return res;
-    int64_t n = (int64_t)allTerms.size();
+    int128_t n = (int128_t)allTerms.size();
 
     // all coeff == -1 and const == n  -> all terms = 1
     bool allNeg = std::all_of(allTerms.begin(), allTerms.end(), [](auto& t){ return t.coeff == -1; });
@@ -482,12 +501,12 @@ std::unordered_map<int,int> applyRule4(const Poly& clause) {
     std::unordered_map<int,int> res;
     if (isZero(clause)) return res;
 
-    int64_t constTerm = getConst(clause);
+    int128_t constTerm = getConst(clause);
 
     // collect ALL non-constant terms (any degree), each binary-valued
     struct TermInfo {
         Monomial mon;
-        int64_t coeff;
+        int128_t coeff;
     };
     std::vector<TermInfo> allTerms;
     for (auto& [m, c] : clause) {
@@ -497,20 +516,20 @@ std::unordered_map<int,int> applyRule4(const Poly& clause) {
     if (allTerms.empty()) return res;
 
     // separate positive and negative coefficient sums
-    int64_t posSum = 0, negSum = 0;
+    int128_t posSum = 0, negSum = 0;
     for (auto& t : allTerms) {
         if (t.coeff > 0) posSum += t.coeff;
         else              negSum += (-t.coeff);
     }
 
     for (auto& t : allTerms) {
-        int64_t c = t.coeff;
+        int128_t c = t.coeff;
         int determined = -1; // -1 = undetermined
         if (c > 0) {
             if (c > negSum - constTerm) determined = 0;
             if (c > posSum + constTerm) determined = 1;
         } else {
-            int64_t ac = -c;
+            int128_t ac = -c;
             if (ac > posSum + constTerm) determined = 0;
             if (ac > negSum - constTerm) determined = 1;
         }
@@ -536,13 +555,13 @@ std::unordered_map<int,Poly> applyRule3(const Poly& clause) {
     std::unordered_map<int,Poly> res;
     if (isZero(clause)) return res;
 
-    int64_t constTerm = getConst(clause);
+    int128_t constTerm = getConst(clause);
     if (constTerm != 0) return res;
 
     // Collect all non-constant terms
     struct TermInfo {
         Monomial mon;
-        int64_t coeff;
+        int128_t coeff;
     };
     std::vector<TermInfo> terms;
     for (auto& [m, c] : clause) {
@@ -554,15 +573,15 @@ std::unordered_map<int,Poly> applyRule3(const Poly& clause) {
     // find the one with coeff +-2 (must be degree-1 for substitution)
     int twoIdx = -1;
     for (int i = 0; i < 3; i++) {
-        if (std::abs(terms[i].coeff) == 2 && terms[i].mon.size() == 1) {
+        if (abs128(terms[i].coeff) == 2 && terms[i].mon.size() == 1) {
             twoIdx = i;
             break;
         }
     }
     if (twoIdx < 0) return res;
 
-    int64_t twoSign  = (terms[twoIdx].coeff > 0) ? 1 : -1;
-    int64_t restSign = -twoSign;
+    int128_t twoSign  = (terms[twoIdx].coeff > 0) ? 1 : -1;
+    int128_t restSign = -twoSign;
 
     // check other two have coeff restSign
     bool ok = true;
@@ -628,12 +647,12 @@ std::unordered_map<int,Poly> applyRule6(const Poly& clause) {
     std::unordered_map<int,Poly> res;
     if (isZero(clause)) return res;
 
-    int64_t constTerm = getConst(clause);
+    int128_t constTerm = getConst(clause);
 
     // Collect ALL non-constant terms with their coefficients
     struct TermInfo {
         Monomial mon;
-        int64_t coeff; // absolute value
+        int128_t coeff; // absolute value
         int origSign;  // +1 or -1
     };
 
@@ -647,7 +666,7 @@ std::unordered_map<int,Poly> applyRule6(const Poly& clause) {
     std::sort(pos.begin(), pos.end(), [](auto& a, auto& b){ return a.coeff > b.coeff; });
     std::sort(neg.begin(), neg.end(), [](auto& a, auto& b){ return a.coeff > b.coeff; });
 
-    int64_t posSum = 0, negSum = 0;
+    int128_t posSum = 0, negSum = 0;
     for (auto& t : pos) posSum += t.coeff;
     for (auto& t : neg) negSum += t.coeff;
 
@@ -657,7 +676,7 @@ std::unordered_map<int,Poly> applyRule6(const Poly& clause) {
     if (posSum > negSum - constTerm && constTerm < 0 && pos.size() >= 2) {
         for (size_t i = 0; i < pos.size(); i++) {
             for (size_t j = i + 1; j < pos.size(); j++) {
-                int64_t cy = pos[i].coeff, cx = pos[j].coeff;
+                int128_t cy = pos[i].coeff, cx = pos[j].coeff;
                 if (cy + cx > negSum - constTerm && -constTerm - posSum + cy + cx > 0) {
                     // These two terms are complementary. Only substitute if both are degree-1.
                     if (pos[i].mon.size() == 1 && pos[j].mon.size() == 1) {
@@ -682,7 +701,7 @@ std::unordered_map<int,Poly> applyRule6(const Poly& clause) {
     if (negSum > posSum + constTerm && constTerm > 0 && neg.size() >= 2) {
         for (size_t i = 0; i < neg.size(); i++) {
             for (size_t j = i + 1; j < neg.size(); j++) {
-                int64_t cy = neg[i].coeff, cx = neg[j].coeff;
+                int128_t cy = neg[i].coeff, cx = neg[j].coeff;
                 if (cy + cx > posSum + constTerm && negSum - constTerm - cy - cx < 0) {
                     if (neg[i].mon.size() == 1 && neg[j].mon.size() == 1) {
                         int vy = neg[i].mon[0], vx = neg[j].mon[0];
@@ -714,17 +733,17 @@ std::unordered_map<int,Poly> applyParityRule(const Poly& clause) {
     // Check if any higher-degree term has an odd coefficient
     // If so, parity analysis on degree-1 terms alone is incorrect
     for (auto& [m, c] : clause) {
-        if (m.size() > 1 && (std::abs(c) % 2 != 0))
+        if (m.size() > 1 && (abs128(c) % 2 != 0))
             return res; // can't apply parity rule safely
     }
 
-    std::vector<std::pair<int,int64_t>> oddTerms;
+    std::vector<std::pair<int,int128_t>> oddTerms;
     for (auto& [m, c] : clause) {
         if (m.empty()) continue;
-        if (m.size() == 1 && (std::abs(c) % 2 != 0))
+        if (m.size() == 1 && (abs128(c) % 2 != 0))
             oddTerms.push_back({m[0], ((c % 2) + 2) % 2});  // reduce to +1
     }
-    int64_t oddConst = getConst(clause) % 2;
+    int128_t oddConst = getConst(clause) % 2;
     if (oddConst < 0) oddConst += 2;
 
     if (oddTerms.size() == 2) {
@@ -810,7 +829,7 @@ SimplifierResult clauseSimplifier(std::vector<Poly> clauses) {
         // --- Divide by GCD ---
         for (auto& c : result.clauses) {
             if (!isZero(c)) {
-                int64_t g = polyGCD(c);
+                int128_t g = polyGCD(c);
                 if (g > 1) c = polyDivideConst(c, g);
             }
         }
@@ -942,8 +961,8 @@ QUBODict buildQUBO(const std::vector<Poly>& clauses, double& offset) {
 
     // Collect degree-3 and degree-4 terms, group by unique variable sets
     // (like the Python quadrizate function)
-    std::map<Monomial, int64_t> cubicTerms;   // 3-variable monomials
-    std::map<Monomial, int64_t> quarticTerms; // 4-variable monomials
+    std::map<Monomial, int128_t> cubicTerms;   // 3-variable monomials
+    std::map<Monomial, int128_t> quarticTerms; // 4-variable monomials
     Poly quadraticH; // degree <= 2 terms kept as-is
 
     for (auto& [m, c] : H) {
@@ -974,7 +993,7 @@ QUBODict buildQUBO(const std::vector<Poly>& clauses, double& offset) {
         } else {
             // Negative: coeff*x1*x2*x3 = min_w |coeff|*(-w*(x1+x2+x3-2))
             //         = min_w |coeff|*(-w*x1 - w*x2 - w*x3 + 2*w)
-            int64_t absC = -coeff;
+            int128_t absC = -coeff;
             addTerm(quadraticH, {w, a},     -absC);    // -w*x1
             addTerm(quadraticH, {w, b},     -absC);    // -w*x2
             addTerm(quadraticH, {w, c_var}, -absC);    // -w*x3
@@ -1008,7 +1027,7 @@ QUBODict buildQUBO(const std::vector<Poly>& clauses, double& offset) {
             // Negative 4th degree: -|a|*x1*x2*x3*x4 = min_w -|a|*w*(x1+x2+x3+x4-3)
             std::string wname = "w_" + std::to_string(g_auxCounter++);
             int w = G_vars.get(wname);
-            int64_t absC = -coeff;
+            int128_t absC = -coeff;
 
             addTerm(quadraticH, {w, a},     -absC);    // -w*x1
             addTerm(quadraticH, {w, b},     -absC);    // -w*x2
@@ -1182,7 +1201,7 @@ void postProcess(const std::vector<int>& quboSolution,
                     p = polySub1(p, it->second, (int)v);
             }
             if (freeVars(p).empty()) {
-                fullAssign[nm] = getConst(p);
+                fullAssign[nm] = (int64_t)getConst(p);
                 changed = true;
             }
         }
@@ -1213,7 +1232,7 @@ void postProcess(const std::vector<int>& quboSolution,
                     p = polySub1(p, it->second, (int)v);
             }
             if (freeVars(p).empty()) {
-                int64_t resolved = getConst(p);
+                int64_t resolved = (int64_t)getConst(p);
                 if (!fullAssign.count(nm) || fullAssign[nm] != resolved) {
                     fullAssign[nm] = resolved;
                     changed = true;
