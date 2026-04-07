@@ -309,7 +309,7 @@ struct ProblemVars {
 ProblemVars initializeVariables(uint128_t N) {
     ProblemVars pv;
     int n_m = bitLen128(N);
-    pv.n_q  = (int)std::ceil(approxLog2_128(N) / 2.0);
+    pv.n_q  = (n_m + 1) / 2;
     pv.n_p  = pv.n_q;
 
     std::cout << "Factoring N = " << N << " (" << n_m << " bits)\n";
