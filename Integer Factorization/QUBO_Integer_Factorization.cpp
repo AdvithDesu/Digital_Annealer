@@ -766,8 +766,12 @@ std::unordered_map<int,Poly> applyParityRule(const Poly& clause) {
     return res;
 }
 
-// Replacement rule: find a clause where one s_ var can be isolated
-std::unordered_map<int,Poly> applyReplacement(const std::vector<Poly>& clauses) {
+// Replacement rule: find a clause where one s_ var can be isolated.
+// maxTerms limits the size of the replacement expression to prevent
+// clause merging that leads to quadratization explosion.
+// When maxTerms <= 0, no limit is applied (original behavior).
+std::unordered_map<int,Poly> applyReplacement(const std::vector<Poly>& clauses,
+                                               int maxTerms = 0) {
     std::unordered_map<int,Poly> res;
     for (auto& clause : clauses) {
         if (isZero(clause)) continue;
@@ -777,6 +781,11 @@ std::unordered_map<int,Poly> applyReplacement(const std::vector<Poly>& clauses) 
             if (c != 1 && c != -1) continue;
             std::string nm = G_vars.name(idx);
             if (nm.rfind("s_", 0) != 0) continue;
+            // The replacement expression has (clause.size() - 1) terms
+            // (excluding the variable being isolated).
+            // Skip if the expression is too large.
+            int exprSize = (int)clause.size() - 1;
+            if (maxTerms > 0 && exprSize > maxTerms) continue;
             // expr = -(clause - c*var) / c
             Poly rest;
             for (auto& [m2, c2] : clause) {
@@ -816,7 +825,7 @@ struct SimplifierResult {
     // mul constraints (simplified: just expression constraints for now)
 };
 
-SimplifierResult clauseSimplifier(std::vector<Poly> clauses) {
+SimplifierResult clauseSimplifier(std::vector<Poly> clauses, int maxReplaceTerms = 0) {
     SimplifierResult result;
     result.clauses = std::move(clauses);
 
@@ -910,7 +919,7 @@ SimplifierResult clauseSimplifier(std::vector<Poly> clauses) {
 
         // --- Replacement ---
         if (!changed) {
-            auto cons = applyReplacement(result.clauses);
+            auto cons = applyReplacement(result.clauses, maxReplaceTerms);
             if (!cons.empty()) {
                 for (auto& [v, expr] : cons) {
                     std::string nm = G_vars.name(v);
@@ -975,6 +984,14 @@ QUBODict buildQUBO(const std::vector<Poly>& clauses, double& offset) {
         }
         // degree > 4 shouldn't occur from squaring degree-2 clauses
     }
+
+    // Diagnostic: count terms by degree
+    int deg2count = (int)quadraticH.size();
+    int deg3count = 0, deg4count = 0;
+    for (auto& [m, c] : cubicTerms) if (c != 0) deg3count++;
+    for (auto& [m, c] : quarticTerms) if (c != 0) deg4count++;
+    std::cout << "H terms by degree: deg<=2=" << deg2count
+              << ", deg3=" << deg3count << ", deg4=" << deg4count << "\n";
 
     // Apply exact quadratization for cubic terms
     for (auto& [m, coeff] : cubicTerms) {
@@ -1311,15 +1328,28 @@ int main(int argc, char* argv[]) {
     std::cout << "Generated " << clauses.size() << " column clauses\n";
 
     // Step 3: simplify
-    SimplifierResult sr = clauseSimplifier(std::move(clauses));
+    // maxReplaceTerms: limit replacement expressions to prevent quadratization explosion.
+    // Only substitute s_ variables whose clause has at most this many other terms.
+    int maxReplaceTerms = 3;
+    SimplifierResult sr = clauseSimplifier(std::move(clauses), maxReplaceTerms);
     std::cout << "After simplification: " << sr.assignmentConstraints.size()
               << " assignment constraints, "
               << sr.expressionConstraints.size() << " expression constraints\n";
 
     // Count non-zero remaining clauses
     int nonZero = 0;
-    for (auto& c : sr.clauses) if (!isZero(c)) nonZero++;
-    std::cout << "Non-zero remaining clauses: " << nonZero << "\n";
+    int maxTerms = 0;
+    int totalTerms = 0;
+    for (auto& c : sr.clauses) {
+        if (!isZero(c)) {
+            nonZero++;
+            int t = (int)c.size();
+            totalTerms += t;
+            if (t > maxTerms) maxTerms = t;
+        }
+    }
+    std::cout << "Non-zero remaining clauses: " << nonZero
+              << " (max terms=" << maxTerms << ", total terms=" << totalTerms << ")\n";
 
     // Step 4: build QUBO
     double offset = 0.0;
