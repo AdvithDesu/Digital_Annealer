@@ -766,12 +766,8 @@ std::unordered_map<int,Poly> applyParityRule(const Poly& clause) {
     return res;
 }
 
-// Replacement rule: find a clause where one s_ var can be isolated.
-// maxTerms limits the size of the replacement expression to prevent
-// clause merging that leads to quadratization explosion.
-// When maxTerms <= 0, no limit is applied (original behavior).
-std::unordered_map<int,Poly> applyReplacement(const std::vector<Poly>& clauses,
-                                               int maxTerms = 0) {
+// Replacement rule: find a clause where one s_ var can be isolated
+std::unordered_map<int,Poly> applyReplacement(const std::vector<Poly>& clauses) {
     std::unordered_map<int,Poly> res;
     for (auto& clause : clauses) {
         if (isZero(clause)) continue;
@@ -781,11 +777,6 @@ std::unordered_map<int,Poly> applyReplacement(const std::vector<Poly>& clauses,
             if (c != 1 && c != -1) continue;
             std::string nm = G_vars.name(idx);
             if (nm.rfind("s_", 0) != 0) continue;
-            // The replacement expression has (clause.size() - 1) terms
-            // (excluding the variable being isolated).
-            // Skip if the expression is too large.
-            int exprSize = (int)clause.size() - 1;
-            if (maxTerms > 0 && exprSize > maxTerms) continue;
             // expr = -(clause - c*var) / c
             Poly rest;
             for (auto& [m2, c2] : clause) {
@@ -825,12 +816,23 @@ struct SimplifierResult {
     // mul constraints (simplified: just expression constraints for now)
 };
 
-SimplifierResult clauseSimplifier(std::vector<Poly> clauses, int maxReplaceTerms = 0) {
+SimplifierResult clauseSimplifier(std::vector<Poly> clauses) {
     SimplifierResult result;
     result.clauses = std::move(clauses);
 
     int maxIter = 2 * (int)result.clauses.size();
     std::cout << "Total iterations possible: " << maxIter << "\n";
+
+    // Backtracking strategy: save state before Replacement starts.
+    // Run Replacement unlimited. If it leads to full resolution (all
+    // clauses zero), keep the result. If not, the Replacement phase
+    // just built a mega-clause without benefit — restore the saved state
+    // which has many small clauses and produces a much smaller QUBO.
+    bool checkpointSaved = false;
+    std::vector<Poly> savedClauses;
+    std::vector<std::pair<std::string,int>>  savedAssign;
+    std::vector<std::pair<std::string,Poly>> savedExpr;
+    int assignsAtCheckpoint = 0;
 
     for (int iter = 0; iter < maxIter; iter++) {
         bool changed = false;
@@ -917,9 +919,18 @@ SimplifierResult clauseSimplifier(std::vector<Poly> clauses, int maxReplaceTerms
             }
         }
 
-        // --- Replacement ---
+        // --- Replacement (cost-gated) ---
         if (!changed) {
-            auto cons = applyReplacement(result.clauses, maxReplaceTerms);
+            // Save checkpoint before first Replacement
+            if (!checkpointSaved) {
+                savedClauses = result.clauses;
+                savedAssign  = result.assignmentConstraints;
+                savedExpr    = result.expressionConstraints;
+                assignsAtCheckpoint = (int)savedAssign.size();
+                checkpointSaved = true;
+            }
+
+            auto cons = applyReplacement(result.clauses);
             if (!cons.empty()) {
                 for (auto& [v, expr] : cons) {
                     std::string nm = G_vars.name(v);
@@ -934,7 +945,24 @@ SimplifierResult clauseSimplifier(std::vector<Poly> clauses, int maxReplaceTerms
         }
     }
 
-    result.clauses = result.clauses;
+    // Backtrack check: if Replacement ran but didn't lead to additional
+    // value assignments (beyond what we had at the checkpoint), the merging
+    // was unproductive — restore the pre-Replacement state.
+    if (checkpointSaved) {
+        int finalAssigns = (int)result.assignmentConstraints.size();
+        if (finalAssigns <= assignsAtCheckpoint) {
+            // No new value assignments from Replacement — restore checkpoint
+            std::cout << "Replacement unproductive, restoring checkpoint ("
+                      << assignsAtCheckpoint << " assigns)\n";
+            result.clauses = std::move(savedClauses);
+            result.assignmentConstraints = std::move(savedAssign);
+            result.expressionConstraints = std::move(savedExpr);
+        } else {
+            std::cout << "Replacement productive: " << assignsAtCheckpoint
+                      << " -> " << finalAssigns << " assigns\n";
+        }
+    }
+
     return result;
 }
 
@@ -1328,10 +1356,11 @@ int main(int argc, char* argv[]) {
     std::cout << "Generated " << clauses.size() << " column clauses\n";
 
     // Step 3: simplify
-    // maxReplaceTerms: limit replacement expressions to prevent quadratization explosion.
-    // Only substitute s_ variables whose clause has at most this many other terms.
-    int maxReplaceTerms = 3;
-    SimplifierResult sr = clauseSimplifier(std::move(clauses), maxReplaceTerms);
+    // Squaring cost budget = n_q^3.  This keeps total QUBO vars at O(n^3).
+    // For close primes (clauses shrink to near-zero), the budget is never
+    // hit and everything resolves fully.  For far-apart primes, the budget
+    // prevents mega-clause formation from cascading replacement.
+    SimplifierResult sr = clauseSimplifier(std::move(clauses));
     std::cout << "After simplification: " << sr.assignmentConstraints.size()
               << " assignment constraints, "
               << sr.expressionConstraints.size() << " expression constraints\n";
