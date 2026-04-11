@@ -15,11 +15,10 @@
 #   -s, --seed       <S>   RNG seed                   (default: auto)
 #   -e, --no-early-stop    disable early termination
 #   -d, --debug            enable debug output from the binary
-#   -v, --verbose          echo full binary output
 
 set -euo pipefail
 
-BINARY="bin_SI/annealer_gpu_SI"
+BINARY="./build/annealer_gpu_SI/annealer_gpu_SI"
 DIR="bin_SI"
 
 # Defaults
@@ -30,7 +29,6 @@ SWEEPS=10
 SEED=""
 EARLY_STOP_FLAG=""
 DEBUG_FLAG=""
-VERBOSE=0
 
 if [[ $# -lt 1 ]]; then
     echo "Usage: $0 <N> [options]" >&2
@@ -55,7 +53,6 @@ while [[ $# -gt 0 ]]; do
         -s|--seed)         SEED="$2";         shift 2 ;;
         -e|--no-early-stop) EARLY_STOP_FLAG="-e"; shift ;;
         -d|--debug)        DEBUG_FLAG="-d";   shift ;;
-        -v|--verbose)      VERBOSE=1;         shift ;;
         *) echo "Unknown option: $1" >&2; exit 1 ;;
     esac
 done
@@ -87,22 +84,25 @@ echo "===== Running N=$N ====="
 echo "Command: ${CMD[*]}"
 echo
 
-# Run, capturing wall clock too in case the binary aborts mid-print.
-START_NS=$(date +%s%N)
-OUTPUT=$("${CMD[@]}" 2>&1) || {
-    echo "$OUTPUT"
-    echo "ERROR: binary exited non-zero" >&2
-    exit 1
-}
-END_NS=$(date +%s%N)
-WALL_SEC=$(awk "BEGIN { printf \"%.6f\", ($END_NS - $START_NS) / 1e9 }")
+# Stream output live AND capture it for later parsing.
+TMP_OUT=$(mktemp)
+trap 'rm -f "$TMP_OUT"' EXIT
 
-if [[ $VERBOSE -eq 1 ]]; then
-    echo "--- Full binary output ---"
-    echo "$OUTPUT"
-    echo "--------------------------"
-    echo
+START_NS=$(date +%s%N)
+set +e
+"${CMD[@]}" 2>&1 | tee "$TMP_OUT"
+STATUS=${PIPESTATUS[0]}
+set -e
+END_NS=$(date +%s%N)
+
+if [[ $STATUS -ne 0 ]]; then
+    echo "ERROR: binary exited with status $STATUS" >&2
+    exit 1
 fi
+
+WALL_SEC=$(awk "BEGIN { printf \"%.6f\", ($END_NS - $START_NS) / 1e9 }")
+OUTPUT=$(cat "$TMP_OUT")
+echo
 
 # --- Parse fields out of the binary's stdout -----------------------------
 grab() { echo "$OUTPUT" | grep -E "$1" | head -1; }
