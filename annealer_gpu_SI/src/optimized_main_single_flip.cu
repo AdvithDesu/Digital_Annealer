@@ -160,13 +160,21 @@ static std::vector<int> buildGreedyColoring(
         if (c >= num_colors) num_colors = c + 1;
     }
 
-    // Sanity: no two adjacent spins share a color.
+    // Sanity: no two adjacent spins share a color. Unconditional — asserts
+    // get stripped under NDEBUG and we want this to fire even in Release.
+    int bad_edges = 0;
     for (int i = 0; i < num_spins; i++) {
         for (int k = row_ptr[i]; k < row_ptr[i + 1]; k++) {
             int j = col_idx[k];
             if (i == j) continue;
-            assert(color_of[i] != color_of[j] && "coloring broken: adjacent spins share a color");
+            if (color_of[i] == color_of[j]) bad_edges++;
         }
+    }
+    if (bad_edges) {
+        fprintf(stderr,
+                "FATAL: coloring broken — %d edges connect same-color spins\n",
+                bad_edges);
+        std::exit(1);
     }
 
     num_colors_out = num_colors;
@@ -273,10 +281,18 @@ __global__ void init_best_energy(float* total_energy, float* best_energy, bool i
 }
 
 
+// Spin-only init (forward decl)
+__global__ void init_spins_only(
+		const float* __restrict__ randvals,
+		signed char*              gpuSpins,
+		curandState*              state,
+		unsigned long             seed,
+		int                       num_spins);
+
 // Initialize lattice spins
 __global__ void init_spins_total_energy(
-		const int* row_ptr, 
-		const int* col_idx, 
+		const int* row_ptr,
+		const int* col_idx,
 		const float* J_values,
 		float* gpuLinTermsVect,
 		const float* __restrict__ randvals,
@@ -779,19 +795,28 @@ int main(int argc, char* argv[])
 
 	gpuErrchk(cudaMemset(d_total_energy, 0, sizeof(float)));
 
-	init_spins_total_energy << < num_spins, THREADS >> > (gpu_row_ptr,
-    	gpu_col_idx,
-    	gpu_J_values,
+	// Phase 1: initialize all spins. Must finish before any block reads
+	// a neighbor's spin, otherwise the energy compute races with the
+	// neighbor block's own spin write.
+	{
+		int blk = (num_spins + 255) / 256;
+		init_spins_only<<<blk, 256>>>(
+			gpu_randvals, gpu_spins_old, devRanStates,
+			(unsigned long)t, (int)num_spins);
+	}
+	cudaDeviceSynchronize();
+
+	// Phase 2: compute initial total energy from the now-stable spins.
+	final_spins_total_energy<<<num_spins, THREADS>>>(
+		gpu_row_ptr,
+		gpu_col_idx,
+		gpu_J_values,
 		gpuLinTermsVect,
-		gpu_randvals,
 		gpu_spins_old,
 		gpu_num_spins,
-		d_total_energy,
-		devRanStates,
-		(unsigned long)t
-	);
-  
-  	cudaDeviceSynchronize();
+		d_total_energy);
+
+	cudaDeviceSynchronize();
 
 	gpuErrchk(cudaMemcpy(gpu_total_energy, d_total_energy, sizeof(float), cudaMemcpyDeviceToHost));
       
@@ -1194,6 +1219,22 @@ __global__ void refreshHubVals(
     int t = blockIdx.x * blockDim.x + threadIdx.x;
     if (t < num_hubs)
         d_hub_vals[t] = gpuLatSpin[d_hub_ids[t]];
+}
+
+// Spin-only init. Must complete (kernel boundary) before any energy
+// kernel reads neighbors, otherwise gpuSpins[col_idx[k]] races with the
+// neighbor block's own spin write inside a fused init+energy kernel.
+__global__ void init_spins_only(
+        const float* __restrict__ randvals,
+        signed char*              gpuSpins,
+        curandState*              state,
+        unsigned long             seed,
+        int                       num_spins)
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= num_spins) return;
+    gpuSpins[i] = (randvals[i] < 0.5f) ? -1 : 1;
+    curand_init(seed, i, 0, &state[i]);
 }
 
 // Initialize lattice spins
