@@ -51,33 +51,6 @@ struct FlipCandidate {
 //__constant__ float kd_floats[1000000];
 
 
-// float atomicMin
-__device__ __forceinline__ float mAtomicMin(float *address, float val)
-{
-	int ret = __float_as_int(*address);
-	while (val < __int_as_float(ret))
-	{
-		int old = ret;
-		if ((ret = atomicCAS((int *)address, old, __float_as_int(val))) == old)
-			break;
-	}
-	return __int_as_float(ret);
-}
-
-
-__device__ __forceinline__ float mAtomicMax(float *address, float val)
-{
-	int ret = __float_as_int(*address);
-	while (val > __int_as_float(ret))
-	{
-		int old = ret;
-		if ((ret = atomicCAS((int *)address, old, __float_as_int(val))) == old)
-			break;
-	}
-	return __int_as_float(ret);
-}
-
-
 #define gpuErrchk(ans) { gpuAssert((ans), __FILE__, __LINE__); }
 inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort = true)
 {
@@ -269,11 +242,8 @@ static ColoringTables buildColoringTables(
     return ct;
 }
 
-// init_best_energy is unused after the int64 conversion (host now seeds
-// best from total directly).
-
 // 1-thread kernel: divide an int64 accumulator by 2. Used to convert from
-// the doubled-energy intermediate produced by init/final energy kernels
+// the doubled-energy intermediate produced by final_spins_total_energy
 // (per-spin contribution = s_i*field_i + 2*s_i*h_i) into the actual E.
 __global__ void halve_energy(int64_t* x)
 {
@@ -288,21 +258,6 @@ __global__ void init_spins_only(
 		curandState*              state,
 		unsigned long             seed,
 		int                       num_spins);
-
-// Initialize lattice spins (unused fused init+energy kernel kept for legacy)
-__global__ void init_spins_total_energy(
-		const int*           row_ptr,
-		const int*           col_idx,
-		const int64_t*       J_values,
-		const int64_t*       gpuLinTermsVect,
-		const float* __restrict__ randvals,
-		signed char*         gpuSpins,
-		const unsigned int*  gpu_num_spins,
-		int64_t*             total_energy,
-		curandState*         state,
-		unsigned long        seed
-);
-
 
 // Final lattice spins. Accumulates DOUBLED energy
 // (s_i*field_i + 2*s_i*h_i) per spin so the per-spin pieces are integers.
@@ -839,9 +794,8 @@ int main(int argc, char* argv[])
 
 	gpu_best_energy[0] = gpu_total_energy[0];
 
-	// d_total_energy already holds the correct initial value (after halve_energy).
-	// No reset needed — applyAllFlipsInColor atomicAdds dE onto it incrementally.
-	gpuErrchk(cudaMemcpy(d_total_energy, gpu_total_energy, sizeof(int64_t), cudaMemcpyHostToDevice));
+	// d_total_energy already holds the correct initial value (after halve_energy);
+	// applyAllFlipsInColor atomicAdds dE onto it incrementally from here.
 
 	auto t_setup_end = std::chrono::high_resolution_clock::now();
 	double t_setup = (double)std::chrono::duration_cast<std::chrono::microseconds>(t_setup_end - t_setup_start).count() * 1e-6;
@@ -1245,24 +1199,6 @@ __global__ void init_spins_only(
     if (i >= num_spins) return;
     gpuSpins[i] = (randvals[i] < 0.5f) ? -1 : 1;
     curand_init(seed, i, 0, &state[i]);
-}
-
-// Legacy fused init+energy kernel — UNUSED. Kept compiling so the symbol
-// resolves; the host now uses init_spins_only + final_spins_total_energy.
-__global__ void init_spins_total_energy(
-		const int*           row_ptr,
-		const int*           col_idx,
-		const int64_t*       J_values,
-		const int64_t*       gpuLinTermsVect,
-		const float* __restrict__ randvals,
-		signed char*         gpuSpins,
-		const unsigned int*  gpu_num_spins,
-		int64_t*             total_energy,
-		curandState*         state,
-		unsigned long        seed){
-	(void)row_ptr; (void)col_idx; (void)J_values; (void)gpuLinTermsVect;
-	(void)randvals; (void)gpuSpins; (void)gpu_num_spins; (void)total_energy;
-	(void)state; (void)seed;
 }
 
 // FINAL lattice energy. Per-spin contribution to (½ s'Js + h's) is not
