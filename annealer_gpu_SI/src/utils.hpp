@@ -11,6 +11,7 @@
 #include <vector>
 #include <functional>
 #include <memory>
+#include <cstdint>
 #include <sys/time.h>
 
 using std::string;
@@ -19,7 +20,7 @@ using std::string;
 double rtclock();
 void printtime(const char *str, double starttime, double endtime);
 
-void readLinearValues(const std::string& filename, unsigned int num_spins, std::vector<float>& linearVect);
+void readLinearValues(const std::string& filename, unsigned int num_spins, std::vector<int64_t>& linearVect);
 
 // =====================================================
 // Legacy dense J parser (UNCHANGED)
@@ -55,23 +56,23 @@ public:
                     const string& values_file);
 
     // Accessors
-    const std::vector<int>&   getRowPtr()   const { return row_ptr; }
-    const std::vector<int>&   getColIdx()   const { return col_idx; }
-    const std::vector<float>& getValues()   const { return values; }
+    const std::vector<int>&     getRowPtr()   const { return row_ptr; }
+    const std::vector<int>&     getColIdx()   const { return col_idx; }
+    const std::vector<int64_t>& getValues()   const { return values; }
 
     unsigned int getNumSpins() const { return num_spins; }
     unsigned int getNNZ()      const { return nnz; }
 
 private:
-    std::vector<int>   row_ptr;
-    std::vector<int>   col_idx;
-    std::vector<float> values;
+    std::vector<int>     row_ptr;
+    std::vector<int>     col_idx;
+    std::vector<int64_t> values;
 
     unsigned int num_spins = 0;
     unsigned int nnz = 0;
 
     void readIntCSV(const string& filename, std::vector<int>& out);
-    void readFloatCSV(const string& filename, std::vector<float>& out);
+    void readInt64CSV(const string& filename, std::vector<int64_t>& out);
     void validate() const;
 };
 

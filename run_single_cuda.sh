@@ -116,9 +116,9 @@ COLOR_SIZES=$(grab "color-class"    | sed -n 's/.*color-class sizes: *//p')
 NNZ_FB=$(grab    "non-hub fallbacks"| sed -n 's/.*non-hub fallbacks=\([0-9]*\) .*/\1/p')
 FB_PCT=$(grab    "non-hub fallbacks"| sed -n 's/.*(\([0-9.]*\)%).*/\1/p')
 
-INIT_ENERGY=$(grab "initial energy" | sed -n 's/.*initial energy \([0-9eE.+-]*\).*/\1/p')
-FINAL_ENERGY=$(grab "total energy value" | sed -n 's/.*total energy value: *\([0-9eE.+-]*\).*/\1/p')
-BEST_ENERGY=$(grab  "best engy"     | sed -n 's/.*best engy \([0-9eE.+-]*\).*/\1/p')
+INIT_ENERGY=$(grab  "initial energy"     | sed -n 's/.*initial energy:* *\(-\?[0-9eE.+-]*\).*/\1/p')
+FINAL_ENERGY=$(grab "total energy value" | sed -n 's/.*total energy value: *\(-\?[0-9eE.+-]*\).*/\1/p')
+BEST_ENERGY=$(grab  "best engy"          | sed -n 's/.*best engy *\(-\?[0-9eE.+-]*\).*/\1/p')
 
 T_LOAD=$(grab   "Load data:"    | awk '{print $3}')
 T_SETUP=$(grab  "Setup (GPU):"  | awk '{print $3}')
