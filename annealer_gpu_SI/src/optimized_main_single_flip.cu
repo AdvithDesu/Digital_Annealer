@@ -14,9 +14,11 @@
 #include <curand_kernel.h>
 #include <time.h>
 #include <algorithm>
+#include <numeric>
+#include <cassert>
 
 #define THREADS 1024 //or more threads gpu crashes
-#define BREAK_UPDATE_VAL 2//1000 
+#define BREAK_UPDATE_VAL 2//1000
 #define TCRIT 2.26918531421f
 
 struct FlipCandidate {
@@ -29,15 +31,15 @@ struct FlipCandidate {
 // packed SPINS_PER_BLOCK_SPARSE at a time into one block of 1024 threads.
 #define DENSE_THRESHOLD         128   // tune after inspecting degree histogram
 #define SPINS_PER_BLOCK_SPARSE   32   // 32 spins × 32 threads = 1024 threads/block
- 
-// Max hub spins cached in __constant__ memory (compile-time literal)
-#define MAX_HUB_SPINS            16   // safe upper bound given your pattern
- 
-// Constant-memory cache for hub spin VALUES (refreshed per flip if needed)
-__constant__ signed char c_hub_spin_vals[MAX_HUB_SPINS];
-// Constant-memory: global indices of hub spins (set once at startup)
-__constant__ int 	c_hub_spin_ids[MAX_HUB_SPINS];
-__constant__ int 	c_num_hub_spins;  // actual count (<= MAX_HUB_SPINS)
+
+// Max hubs — used to size shared-memory hub cache in the sparse kernel.
+// Raised from 16 because dense spin count scales ~log(N) and we now target N up to ~1M.
+#define MAX_HUB_SPINS            256
+
+// High bit tags a sparse neighbor as "this is a hub index into d_hub_vals"
+// (low 31 bits = hub index). Otherwise the entry is a plain global spin id.
+#define HUB_TAG_BIT              0x80000000
+#define HUB_IDX_MASK             0x7FFFFFFF
 
 #include "utils.hpp"
 
@@ -83,6 +85,178 @@ inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort =
 	}
 }
 
+
+// =====================================================================
+// Host-side preprocessing: greedy graph coloring + sparse-CSR-with-tagged-hubs
+// =====================================================================
+//
+// Purpose:
+//   1. Color the interaction graph (nodes=spins, edges = nonzero J_ij) so
+//      that within a color class no two spins interact. We can then flip
+//      every accepted spin in a color *in parallel* without breaking the
+//      running total-energy accumulator.
+//   2. Build a sparse-only CSR for the sparse-bin spins where col_idx is
+//      tagged: high bit set => remaining bits are an index into d_hub_vals
+//      (hot path), high bit clear => raw global spin id (rare fallback).
+//
+// Both are O(N + nnz) and run once at setup.
+
+struct ColoringTables {
+    int num_colors = 0;
+
+    // Per-color dense spin lists (global spin ids), concatenated.
+    std::vector<int> color_dense_flat;
+    std::vector<int> color_dense_offsets;   // size num_colors+1
+
+    // Per-color sparse spin lists. These are *indices into the sparse CSR*
+    // (0..num_sparse-1), NOT global spin ids. The sparse kernel maps them
+    // back to global ids via sparse_global_id[].
+    std::vector<int> color_sparse_flat;
+    std::vector<int> color_sparse_offsets;  // size num_colors+1
+};
+
+struct SparseCSR {
+    std::vector<int>   row_ptr;           // size num_sparse+1
+    std::vector<int>   col_idx_tagged;    // tagged per HUB_TAG_BIT
+    std::vector<float> J_values;
+    std::vector<int>   global_id;         // size num_sparse; sparse-idx -> global spin id
+    int                num_sparse = 0;
+    int                nnz_hub_fallback = 0;
+};
+
+// Welsh-Powell style greedy coloring: largest-degree-first, first-fit.
+// Returns color_of[num_spins] and num_colors via out-param.
+static std::vector<int> buildGreedyColoring(
+    const std::vector<int>& row_ptr,
+    const std::vector<int>& col_idx,
+    int num_spins,
+    int& num_colors_out)
+{
+    std::vector<int> order(num_spins);
+    std::iota(order.begin(), order.end(), 0);
+    std::sort(order.begin(), order.end(), [&](int a, int b) {
+        int da = row_ptr[a + 1] - row_ptr[a];
+        int db = row_ptr[b + 1] - row_ptr[b];
+        return da > db;
+    });
+
+    std::vector<int> color_of(num_spins, -1);
+    int num_colors = 0;
+    std::vector<char> used;   // reused scratch, size tracks num_colors
+    used.reserve(64);
+
+    for (int v : order) {
+        used.assign(num_colors + 1, 0);
+        int start = row_ptr[v];
+        int end   = row_ptr[v + 1];
+        for (int k = start; k < end; k++) {
+            int n = col_idx[k];
+            int cn = color_of[n];
+            if (cn >= 0) used[cn] = 1;
+        }
+        int c = 0;
+        while (c < (int)used.size() && used[c]) c++;
+        color_of[v] = c;
+        if (c >= num_colors) num_colors = c + 1;
+    }
+
+    // Sanity: no two adjacent spins share a color.
+    for (int i = 0; i < num_spins; i++) {
+        for (int k = row_ptr[i]; k < row_ptr[i + 1]; k++) {
+            int j = col_idx[k];
+            if (i == j) continue;
+            assert(color_of[i] != color_of[j] && "coloring broken: adjacent spins share a color");
+        }
+    }
+
+    num_colors_out = num_colors;
+    return color_of;
+}
+
+// Build the sparse-only CSR with hub-tagged col_idx.
+static SparseCSR buildSparseCSR(
+    const std::vector<int>&   row_ptr,
+    const std::vector<int>&   col_idx,
+    const std::vector<float>& J_values,
+    const std::vector<int>&   dense_spins,
+    const std::vector<int>&   sparse_spins,
+    int                       num_spins)
+{
+    SparseCSR out;
+    int num_sparse = (int)sparse_spins.size();
+    out.num_sparse = num_sparse;
+    out.row_ptr.resize(num_sparse + 1);
+    out.global_id.resize(num_sparse);
+
+    // global_id -> hub_idx, -1 if not a hub
+    std::vector<int> hub_map(num_spins, -1);
+    for (int i = 0; i < (int)dense_spins.size(); i++)
+        hub_map[dense_spins[i]] = i;
+
+    out.row_ptr[0] = 0;
+    for (int s = 0; s < num_sparse; s++) {
+        int gid = sparse_spins[s];
+        out.global_id[s] = gid;
+        int start = row_ptr[gid];
+        int end   = row_ptr[gid + 1];
+        for (int k = start; k < end; k++) {
+            int nb = col_idx[k];
+            float J = J_values[k];
+            int h = hub_map[nb];
+            if (h >= 0) {
+                out.col_idx_tagged.push_back((int)(h | HUB_TAG_BIT));
+            } else {
+                out.col_idx_tagged.push_back(nb);
+                out.nnz_hub_fallback++;
+            }
+            out.J_values.push_back(J);
+        }
+        out.row_ptr[s + 1] = (int)out.col_idx_tagged.size();
+    }
+    return out;
+}
+
+// Bucket dense/sparse spins by color.
+// dense spins are stored as global ids; sparse spins as indices into the sparse CSR.
+static ColoringTables buildColoringTables(
+    const std::vector<int>& color_of,
+    int                     num_colors,
+    const std::vector<int>& dense_spins,     // global ids
+    const SparseCSR&        scsr)
+{
+    ColoringTables ct;
+    ct.num_colors = num_colors;
+    ct.color_dense_offsets.assign(num_colors + 1, 0);
+    ct.color_sparse_offsets.assign(num_colors + 1, 0);
+
+    // Pass 1: count
+    for (int g : dense_spins)
+        ct.color_dense_offsets[color_of[g] + 1]++;
+    for (int s = 0; s < scsr.num_sparse; s++)
+        ct.color_sparse_offsets[color_of[scsr.global_id[s]] + 1]++;
+
+    // Prefix sum
+    for (int c = 0; c < num_colors; c++) {
+        ct.color_dense_offsets[c + 1]  += ct.color_dense_offsets[c];
+        ct.color_sparse_offsets[c + 1] += ct.color_sparse_offsets[c];
+    }
+
+    ct.color_dense_flat.resize(ct.color_dense_offsets[num_colors]);
+    ct.color_sparse_flat.resize(ct.color_sparse_offsets[num_colors]);
+
+    // Pass 2: scatter using per-color cursors
+    std::vector<int> cur_dense  = ct.color_dense_offsets;
+    std::vector<int> cur_sparse = ct.color_sparse_offsets;
+    for (int g : dense_spins) {
+        int c = color_of[g];
+        ct.color_dense_flat[cur_dense[c]++] = g;
+    }
+    for (int s = 0; s < scsr.num_sparse; s++) {
+        int c = color_of[scsr.global_id[s]];
+        ct.color_sparse_flat[cur_sparse[c]++] = s;
+    }
+    return ct;
+}
 
 __global__ void init_best_energy(float* total_energy, float* best_energy, bool init = false)
 {
@@ -136,30 +310,41 @@ __global__ void collectFlipCandidates_dense(
         const float    beta,
         FlipCandidate* candidates,
         int*           num_candidates,
-        const int*     dense_spin_ids   // maps blockIdx.x → global spin id
+        const int*     dense_spin_ids   // maps blockIdx.x → global spin id (for this color)
 );
 
 
 __global__ void collectFlipCandidates_sparse(
-        const int*     row_ptr,
-        const int*     col_idx,
-        const float*   J_values,
-        float*         gpuLinTermsVect,
+        const int*          sparse_row_ptr,
+        const int*          sparse_col_idx_tagged,
+        const float*        sparse_J_values,
+        const int*          sparse_global_id,
+        const float*        gpuLinTermsVect,
         const float* __restrict__ randvals,
-        signed char*   gpuLatSpin,
-        const float    beta,
-        FlipCandidate* candidates,
-        int*           num_candidates,
-        const int*     sparse_spin_ids,  // logical sparse index → global spin id
-        int            num_sparse
+        signed char*        gpuLatSpin,
+        const signed char*  d_hub_vals,
+        int                 num_hubs,
+        const float         beta,
+        FlipCandidate*      candidates,
+        int*                num_candidates,
+        const int*          color_sparse_csr_ids,   // sparse-CSR indices for this color
+        int                 num_in_color
 );
 
 
-__global__ void applySingleFlip(
-        signed char*   gpuLatSpin,
-        float*         d_total_energy,
-        FlipCandidate* candidates,
-        int            chosen_idx
+__global__ void applyAllFlipsInColor(
+        signed char*         gpuLatSpin,
+        float*               d_total_energy,
+        const FlipCandidate* candidates,
+        const int*           num_candidates
+);
+
+
+__global__ void refreshHubVals(
+        const signed char* gpuLatSpin,
+        const int*         d_hub_ids,
+        signed char*       d_hub_vals,
+        int                num_hubs
 );
 
 std::vector<double> create_beta_schedule_geometric(uint32_t num_sweeps, double temp_start, double temp_end, double alpha);
@@ -378,7 +563,7 @@ int main(int argc, char* argv[])
 	std::vector<int> dense_spins, sparse_spins;
 	dense_spins.reserve(32);
 	sparse_spins.reserve(num_spins);
-	 
+
 	for (unsigned int i = 0; i < num_spins; i++) {
 	    int degree = row_ptr[i + 1] - row_ptr[i];
 	    if (degree >= DENSE_THRESHOLD)
@@ -386,31 +571,115 @@ int main(int argc, char* argv[])
 	    else
 	        sparse_spins.push_back(i);
 	}
-	 
+
 	int num_dense  = (int)dense_spins.size();
 	int num_sparse = (int)sparse_spins.size();
-	 
+
 	std::cout << "Bin sizes (dense): " << num_dense
 	          << "  sparse: "          << num_sparse << std::endl;
 
-	int h_num_hub = std::min(num_dense, (int)MAX_HUB_SPINS);
-	 
-	if (num_dense > MAX_HUB_SPINS)
-	    std::cerr << "WARNING: more dense spins than MAX_HUB_SPINS ("
-	              << MAX_HUB_SPINS << "). Increase the constant.\n";
-	 
-	// Upload hub indices to __constant__ memory (done once, never changes)
-	cudaMemcpyToSymbol(c_hub_spin_ids,  dense_spins.data(), h_num_hub * sizeof(int));
-	cudaMemcpyToSymbol(c_num_hub_spins, &h_num_hub,         sizeof(int));
-	 
-	// GPU arrays for bin membership
+	if (num_dense > MAX_HUB_SPINS) {
+	    std::cerr << "ERROR: num_dense (" << num_dense << ") exceeds MAX_HUB_SPINS ("
+	              << MAX_HUB_SPINS << "). Raise the compile-time limit.\n";
+	    exit(1);
+	}
+	int h_num_hub = num_dense;
 
-	int *gpu_dense_ids, *gpu_sparse_ids;
-	gpuErrchk(cudaMalloc((void**)&gpu_dense_ids, num_dense  * sizeof(int)));
-	gpuErrchk(cudaMalloc((void**)&gpu_sparse_ids, num_sparse * sizeof(int)));
+	// ── Graph coloring (greedy, largest-degree-first) ────────────────────────
+	int num_colors = 0;
+	std::vector<int> color_of = buildGreedyColoring(row_ptr, col_idx, num_spins, num_colors);
+	std::cout << "Graph coloring: num_colors = " << num_colors << std::endl;
 
-	gpuErrchk(cudaMemcpy(gpu_dense_ids,  dense_spins.data(), num_dense  * sizeof(int), cudaMemcpyHostToDevice));
-	gpuErrchk(cudaMemcpy(gpu_sparse_ids, sparse_spins.data(), num_sparse * sizeof(int), cudaMemcpyHostToDevice));
+	// Color-class size histogram for diagnostic output.
+	{
+	    std::vector<int> sz(num_colors, 0);
+	    for (int v = 0; v < (int)num_spins; v++) sz[color_of[v]]++;
+	    int mn = sz[0], mx = sz[0];
+	    for (int s : sz) { mn = std::min(mn, s); mx = std::max(mx, s); }
+	    std::cout << "  color-class sizes: min=" << mn << " max=" << mx
+	              << " avg=" << (num_spins / num_colors) << std::endl;
+	}
+
+	// ── Build sparse-only CSR with hub-tagged col_idx ────────────────────────
+	SparseCSR scsr = buildSparseCSR(row_ptr, col_idx, J_values,
+	                                dense_spins, sparse_spins, num_spins);
+	std::cout << "Sparse CSR: num_sparse=" << scsr.num_sparse
+	          << " nnz=" << scsr.col_idx_tagged.size()
+	          << " non-hub fallbacks=" << scsr.nnz_hub_fallback
+	          << " ("
+	          << (scsr.col_idx_tagged.empty() ? 0.0
+	                : 100.0 * scsr.nnz_hub_fallback / scsr.col_idx_tagged.size())
+	          << "%)" << std::endl;
+
+	// ── Bucket dense/sparse spin ids by color ────────────────────────────────
+	ColoringTables ct = buildColoringTables(color_of, num_colors, dense_spins, scsr);
+
+	// ── GPU uploads: color tables ────────────────────────────────────────────
+	int *gpu_color_dense_flat = nullptr,  *gpu_color_dense_offsets  = nullptr;
+	int *gpu_color_sparse_flat = nullptr, *gpu_color_sparse_offsets = nullptr;
+	if (!ct.color_dense_flat.empty()) {
+	    gpuErrchk(cudaMalloc((void**)&gpu_color_dense_flat,
+	                         ct.color_dense_flat.size() * sizeof(int)));
+	    gpuErrchk(cudaMemcpy(gpu_color_dense_flat, ct.color_dense_flat.data(),
+	                         ct.color_dense_flat.size() * sizeof(int),
+	                         cudaMemcpyHostToDevice));
+	}
+	gpuErrchk(cudaMalloc((void**)&gpu_color_dense_offsets,
+	                     ct.color_dense_offsets.size() * sizeof(int)));
+	gpuErrchk(cudaMemcpy(gpu_color_dense_offsets, ct.color_dense_offsets.data(),
+	                     ct.color_dense_offsets.size() * sizeof(int),
+	                     cudaMemcpyHostToDevice));
+
+	if (!ct.color_sparse_flat.empty()) {
+	    gpuErrchk(cudaMalloc((void**)&gpu_color_sparse_flat,
+	                         ct.color_sparse_flat.size() * sizeof(int)));
+	    gpuErrchk(cudaMemcpy(gpu_color_sparse_flat, ct.color_sparse_flat.data(),
+	                         ct.color_sparse_flat.size() * sizeof(int),
+	                         cudaMemcpyHostToDevice));
+	}
+	gpuErrchk(cudaMalloc((void**)&gpu_color_sparse_offsets,
+	                     ct.color_sparse_offsets.size() * sizeof(int)));
+	gpuErrchk(cudaMemcpy(gpu_color_sparse_offsets, ct.color_sparse_offsets.data(),
+	                     ct.color_sparse_offsets.size() * sizeof(int),
+	                     cudaMemcpyHostToDevice));
+
+	// ── GPU uploads: sparse-only CSR ─────────────────────────────────────────
+	int   *gpu_sparse_row_ptr = nullptr;
+	int   *gpu_sparse_col_idx_tagged = nullptr;
+	float *gpu_sparse_J_values = nullptr;
+	int   *gpu_sparse_global_id = nullptr;
+	gpuErrchk(cudaMalloc((void**)&gpu_sparse_row_ptr,
+	                     (scsr.num_sparse + 1) * sizeof(int)));
+	gpuErrchk(cudaMemcpy(gpu_sparse_row_ptr, scsr.row_ptr.data(),
+	                     (scsr.num_sparse + 1) * sizeof(int), cudaMemcpyHostToDevice));
+	if (!scsr.col_idx_tagged.empty()) {
+	    gpuErrchk(cudaMalloc((void**)&gpu_sparse_col_idx_tagged,
+	                         scsr.col_idx_tagged.size() * sizeof(int)));
+	    gpuErrchk(cudaMemcpy(gpu_sparse_col_idx_tagged, scsr.col_idx_tagged.data(),
+	                         scsr.col_idx_tagged.size() * sizeof(int),
+	                         cudaMemcpyHostToDevice));
+	    gpuErrchk(cudaMalloc((void**)&gpu_sparse_J_values,
+	                         scsr.J_values.size() * sizeof(float)));
+	    gpuErrchk(cudaMemcpy(gpu_sparse_J_values, scsr.J_values.data(),
+	                         scsr.J_values.size() * sizeof(float),
+	                         cudaMemcpyHostToDevice));
+	}
+	if (scsr.num_sparse > 0) {
+	    gpuErrchk(cudaMalloc((void**)&gpu_sparse_global_id,
+	                         scsr.num_sparse * sizeof(int)));
+	    gpuErrchk(cudaMemcpy(gpu_sparse_global_id, scsr.global_id.data(),
+	                         scsr.num_sparse * sizeof(int), cudaMemcpyHostToDevice));
+	}
+
+	// ── GPU uploads: hub arrays (global, not constant memory) ────────────────
+	int         *gpu_hub_ids  = nullptr;
+	signed char *gpu_hub_vals = nullptr;
+	if (h_num_hub > 0) {
+	    gpuErrchk(cudaMalloc((void**)&gpu_hub_ids,  h_num_hub * sizeof(int)));
+	    gpuErrchk(cudaMemcpy(gpu_hub_ids, dense_spins.data(),
+	                         h_num_hub * sizeof(int), cudaMemcpyHostToDevice));
+	    gpuErrchk(cudaMalloc((void**)&gpu_hub_vals, h_num_hub * sizeof(signed char)));
+	}
 
 	// Setup cuRAND generator
 
@@ -530,16 +799,11 @@ int main(int argc, char* argv[])
 
 	printtime("init_spins values and calculate total Energy time: ", starttime, endtime);
 
-	// ── Initialize hub values in constant memory before annealing ────────
-	{
-	    signed char h_hub_vals[MAX_HUB_SPINS];
-	    for (int hh = 0; hh < h_num_hub; hh++) {
-	        gpuErrchk(cudaMemcpy(&h_hub_vals[hh], 
-	                             gpu_spins_old + dense_spins[hh],
-	                             sizeof(signed char),
-	                             cudaMemcpyDeviceToHost));
-	    }
-	    cudaMemcpyToSymbol(c_hub_spin_vals, h_hub_vals, h_num_hub * sizeof(signed char));
+	// ── Initialize hub values cache from the live spin array ─────────────
+	if (h_num_hub > 0) {
+	    int hb = (h_num_hub + 63) / 64;
+	    refreshHubVals<<<hb, 64>>>(gpu_spins_old, gpu_hub_ids, gpu_hub_vals, h_num_hub);
+	    cudaDeviceSynchronize();
 	}
  
 	gpuErrchk(cudaPeekAtLastError());
@@ -547,7 +811,7 @@ int main(int argc, char* argv[])
 	gpu_best_energy[0] = gpu_total_energy[0];
 
 	// d_total_energy already holds the correct initial value from init_spins_total_energy.
-	// No reset needed here — applySingleFlip will atomicAdd dE onto it incrementally.
+	// No reset needed here — applyAllFlipsInColor atomicAdds dE onto it incrementally.
 	// We just confirm the device value is in sync before the loop starts.
 	gpuErrchk(cudaMemcpy(d_total_energy, gpu_total_energy, sizeof(float), cudaMemcpyHostToDevice));
 
@@ -560,132 +824,102 @@ int main(int argc, char* argv[])
 	auto t0 = std::chrono::high_resolution_clock::now();
 	auto annealing_start = std::chrono::high_resolution_clock::now(); 
 
+	// Previous-iteration best energy used for coarse early-stop tracking.
+	float prev_best = gpu_best_energy[0];
+	int no_update = 0;
+
 	// Temperature loop
-	for (int i = 0; i < beta_schedule.size(); i++){
+	for (int i = 0; i < (int)beta_schedule.size(); i++) {
 
-		int no_update = 0;
-		cudaEvent_t start, stop;
-		if(debug){   
-			// @ Debugging
-			cudaEventCreate(&start);
-			cudaEventCreate(&stop);
-		}         
-	         
-		for (int ii = 0; ii < num_sweeps_per_beta; ii++) {
-		
-		    // 1. Generate fresh random values for Metropolis acceptance test
+		for (int ii = 0; ii < (int)num_sweeps_per_beta; ii++) {
+
+		    // Fresh randoms for this full-sweep's Metropolis tests.
 		    curandGenerateUniform(rng, gpu_randvals, num_spins);
-		
-		    // 2. Reset candidate counter
-		    gpuErrchk(cudaMemset(gpu_num_candidates, 0, sizeof(int)));
 
-			// 3a. Dense bin — one block per hub spin, 1024 threads each
-			if (num_dense > 0) {
-			    collectFlipCandidates_dense<<<num_dense, THREADS>>>(
-			        gpu_row_ptr,
-			        gpu_col_idx,
-			        gpu_J_values,
-			        gpuLinTermsVect,
-			        gpu_randvals,
-			        gpu_spins_old,
-			        (float)beta_schedule[i],
-			        gpu_candidates,
-			        gpu_num_candidates,
-			        gpu_dense_ids
-			    );
-			}
-			 
-			// 3b. Sparse bin — 32 spins per block, one warp per spin
-			if (num_sparse > 0) {
-			    int sparse_blocks = (num_sparse + SPINS_PER_BLOCK_SPARSE - 1) / SPINS_PER_BLOCK_SPARSE;
-			    collectFlipCandidates_sparse<<<sparse_blocks, THREADS>>>(
-			        gpu_row_ptr,
-			        gpu_col_idx,
-			        gpu_J_values,
-			        gpuLinTermsVect,
-			        gpu_randvals,
-			        gpu_spins_old,
-			        (float)beta_schedule[i],
-			        gpu_candidates,
-			        gpu_num_candidates,
-			        gpu_sparse_ids,
-			        num_sparse
-			    );
-			}
-			 
-			cudaDeviceSynchronize();   // single sync covers both kernels
+		    // One parallel Metropolis pass per color class.
+		    for (int c = 0; c < num_colors; c++) {
+		        int dense_begin  = ct.color_dense_offsets[c];
+		        int dense_end    = ct.color_dense_offsets[c + 1];
+		        int nd           = dense_end - dense_begin;
 
-		    // 4. Read candidate count back to host
-		    int h_num_candidates = 0;
-		    gpuErrchk(cudaMemcpy(&h_num_candidates, gpu_num_candidates, sizeof(int), cudaMemcpyDeviceToHost));
-		
-		    if (h_num_candidates > 0) {
-		
-		        // 5. Pick one candidate uniformly at random on the host
-		        int chosen = (int)(((double)rand() / RAND_MAX) * h_num_candidates);
-		        if (chosen >= h_num_candidates) chosen = h_num_candidates - 1;
-		
-		        // 6. Apply that single flip and update running energy via atomicAdd
-		        applySingleFlip<<<1, 1>>>(
-		            gpu_spins_old,
-		            d_total_energy,
-		            gpu_candidates,
-		            chosen
-		        );
-		        cudaDeviceSynchronize();
+		        int sparse_begin = ct.color_sparse_offsets[c];
+		        int sparse_end   = ct.color_sparse_offsets[c + 1];
+		        int ns           = sparse_end - sparse_begin;
 
-				// Refresh hub values in __constant__ memory if a hub was flipped
-				{
-				    FlipCandidate h_chosen;
-				    gpuErrchk(cudaMemcpy(&h_chosen, gpu_candidates + chosen, sizeof(FlipCandidate),
-				                         cudaMemcpyDeviceToHost));
-				 
-				    bool is_hub = std::find(dense_spins.begin(), dense_spins.end(),
-				                            h_chosen.spin_id) != dense_spins.end();
-				    if (is_hub) {
-				        // Pull updated values for hub slots only (MAX_HUB_SPINS bytes — negligible)
-						signed char h_hub_vals[MAX_HUB_SPINS];
-						int h_dense_ids[MAX_HUB_SPINS];
+		        if (nd == 0 && ns == 0) continue;
 
-						gpuErrchk(cudaMemcpy(h_dense_ids, gpu_dense_ids, h_num_hub * sizeof(int), 
-												cudaMemcpyDeviceToHost));
+		        gpuErrchk(cudaMemsetAsync(gpu_num_candidates, 0, sizeof(int)));
 
-						for (int hh = 0; hh < h_num_hub; hh++) {
-						    gpuErrchk(cudaMemcpy(&h_hub_vals[hh], gpu_spins_old + h_dense_ids[hh],
-						                         sizeof(signed char),
-						                         cudaMemcpyDeviceToHost));
-						}
-						cudaMemcpyToSymbol(c_hub_spin_vals, h_hub_vals, h_num_hub * sizeof(signed char));
-				    }
-				}
+		        if (nd > 0) {
+		            collectFlipCandidates_dense<<<nd, THREADS>>>(
+		                gpu_row_ptr,
+		                gpu_col_idx,
+		                gpu_J_values,
+		                gpuLinTermsVect,
+		                gpu_randvals,
+		                gpu_spins_old,
+		                (float)beta_schedule[i],
+		                gpu_candidates,
+		                gpu_num_candidates,
+		                gpu_color_dense_flat + dense_begin
+		            );
+		        }
 
-		        // 7. Read updated energy
-		        gpuErrchk(cudaMemcpy(gpu_total_energy, d_total_energy, sizeof(float), cudaMemcpyDeviceToHost));
-		
-		        gpu_best_energy[0] = std::min(gpu_total_energy[0], gpu_best_energy[0]);
-		
-		        // 8. Early stopping
-		        if ((gpu_best_energy[0] - gpu_total_energy[0]) < CHANGE_MAX_ENERGY)
-		            no_update = 0;
-		        else
-		            no_update++;
-		
-		        if (!disable_early_stop && no_update > (int)(BREAK_AFTER_ITERATION * num_sweeps_per_beta)) {
-		            printf("Breaking early at temperature iteration %d\n", i);
-		            break;
+		        if (ns > 0) {
+		            int sparse_blocks = (ns + SPINS_PER_BLOCK_SPARSE - 1) / SPINS_PER_BLOCK_SPARSE;
+		            collectFlipCandidates_sparse<<<sparse_blocks, THREADS>>>(
+		                gpu_sparse_row_ptr,
+		                gpu_sparse_col_idx_tagged,
+		                gpu_sparse_J_values,
+		                gpu_sparse_global_id,
+		                gpuLinTermsVect,
+		                gpu_randvals,
+		                gpu_spins_old,
+		                gpu_hub_vals,
+		                h_num_hub,
+		                (float)beta_schedule[i],
+		                gpu_candidates,
+		                gpu_num_candidates,
+		                gpu_color_sparse_flat + sparse_begin,
+		                ns
+		            );
+		        }
+
+		        // Apply every accepted flip from this color in parallel.
+		        // Worst-case num_candidates = nd + ns, so launch that many threads.
+		        int color_size = nd + ns;
+		        int apply_blocks = (color_size + 255) / 256;
+		        applyAllFlipsInColor<<<apply_blocks, 256>>>(
+		            gpu_spins_old, d_total_energy, gpu_candidates, gpu_num_candidates);
+
+		        // If any hub could have been flipped this color, refresh cache.
+		        if (nd > 0) {
+		            int hb = (h_num_hub + 63) / 64;
+		            refreshHubVals<<<hb, 64>>>(
+		                gpu_spins_old, gpu_hub_ids, gpu_hub_vals, h_num_hub);
 		        }
 		    }
-			// Always sync energy to host at end of each sweep regardless of whether a flip occurred
-			gpuErrchk(cudaMemcpy(gpu_total_energy, d_total_energy, sizeof(float), cudaMemcpyDeviceToHost));
 		}
-		gpuErrchk(cudaMemcpy(gpu_total_energy, d_total_energy, sizeof(float), cudaMemcpyDeviceToHost));
+
+		// One host sync per temperature iteration.
+		cudaDeviceSynchronize();
+		gpuErrchk(cudaMemcpy(gpu_total_energy, d_total_energy,
+		                     sizeof(float), cudaMemcpyDeviceToHost));
 		gpu_best_energy[0] = std::min(gpu_total_energy[0], gpu_best_energy[0]);
 		energy_history.push_back(gpu_best_energy[0]);
-	    if(debug){
-	        cudaEventDestroy(start);
-	        cudaEventDestroy(stop);
-	    }
-}
+
+		// Coarse early stopping: count temperatures with no best-energy improvement.
+		if (gpu_best_energy[0] < prev_best - CHANGE_MAX_ENERGY) {
+		    no_update = 0;
+		    prev_best = gpu_best_energy[0];
+		} else {
+		    no_update++;
+		}
+		if (!disable_early_stop && no_update > (int)BREAK_AFTER_ITERATION * 10) {
+		    printf("Breaking early at temperature iteration %d\n", i);
+		    break;
+		}
+	}
  
 	auto t1 = std::chrono::high_resolution_clock::now();
 
@@ -770,8 +1004,16 @@ int main(int argc, char* argv[])
 	cudaFree(devRanStates);
 	cudaFree(gpu_candidates);
 	cudaFree(gpu_num_candidates);
-	cudaFree(gpu_dense_ids);
-	cudaFree(gpu_sparse_ids);
+	cudaFree(gpu_color_dense_flat);
+	cudaFree(gpu_color_dense_offsets);
+	cudaFree(gpu_color_sparse_flat);
+	cudaFree(gpu_color_sparse_offsets);
+	cudaFree(gpu_sparse_row_ptr);
+	cudaFree(gpu_sparse_col_idx_tagged);
+	cudaFree(gpu_sparse_J_values);
+	cudaFree(gpu_sparse_global_id);
+	cudaFree(gpu_hub_ids);
+	cudaFree(gpu_hub_vals);
 
 	return 0;
 }
@@ -829,72 +1071,73 @@ __global__ void collectFlipCandidates_dense(
 
 #endif
 
-// Binary search to check if a spin_id is a hub and get its constant-memory index
-__device__ __forceinline__ int find_hub_index(int spin_id) {
-    // Linear search is faster than binary for small MAX_HUB_SPINS (16)
-    // If c_num_hub_spins grows large, switch to binary search
-    for (int i = 0; i < c_num_hub_spins; i++) {
-        if (c_hub_spin_ids[i] == spin_id)
-            return i;  // found — return index into c_hub_spin_vals[]
-    }
-    return -1;  // not a hub
-}
-
+// Sparse-bin Metropolis candidate collection for a single color class.
+//
+// Layout: SPINS_PER_BLOCK_SPARSE warps per block, one warp per sparse spin.
+// Hub values for the whole problem are copied into shared memory at block
+// start (≤256 bytes total) so the inner neighbor-sum loop becomes a shared
+// load for the hot "neighbor is a hub" case and a global load for the rare
+// fallback. Neighbor tagging is resolved branchlessly via the sign bit.
 __global__ void collectFlipCandidates_sparse(
-        const int*     row_ptr,
-        const int*     col_idx,
-        const float*   J_values,
-        float*         gpuLinTermsVect,
+        const int*          sparse_row_ptr,
+        const int*          sparse_col_idx_tagged,
+        const float*        sparse_J_values,
+        const int*          sparse_global_id,
+        const float*        gpuLinTermsVect,
         const float* __restrict__ randvals,
-        signed char*   gpuLatSpin,
-        const float    beta,
-        FlipCandidate* candidates,
-        int*           num_candidates,
-        const int*     sparse_spin_ids,  // logical sparse index → global spin id
-        int            num_sparse
+        signed char*        gpuLatSpin,
+        const signed char*  d_hub_vals,
+        int                 num_hubs,
+        const float         beta,
+        FlipCandidate*      candidates,
+        int*                num_candidates,
+        const int*          color_sparse_csr_ids,
+        int                 num_in_color
 ){
-    // Which sparse spin does this warp own?
-    int warp_in_block = threadIdx.x / 32;     // 0 .. SPINS_PER_BLOCK_SPARSE-1
-    int lane          = threadIdx.x & 31;     // 0 .. 31
- 
-    int sparse_idx = (int)blockIdx.x * SPINS_PER_BLOCK_SPARSE + warp_in_block;
-    if (sparse_idx >= num_sparse) return;
- 
-    int vertice_Id = sparse_spin_ids[sparse_idx];   // global spin index
- 
+    __shared__ signed char s_hub_vals[MAX_HUB_SPINS];
+
+    // Cooperative load of hub cache (≤ MAX_HUB_SPINS bytes).
+    for (int t = threadIdx.x; t < num_hubs; t += blockDim.x)
+        s_hub_vals[t] = d_hub_vals[t];
+    __syncthreads();
+
+    int warp_in_block = threadIdx.x / 32;
+    int lane          = threadIdx.x & 31;
+
+    int slot = (int)blockIdx.x * SPINS_PER_BLOCK_SPARSE + warp_in_block;
+    if (slot >= num_in_color) return;
+
+    int sparse_idx = color_sparse_csr_ids[slot];       // index into sparse CSR
+    int vertice_Id = sparse_global_id[sparse_idx];     // global spin id
+
     float current_spin = (float)gpuLatSpin[vertice_Id];
- 
-    int start = row_ptr[vertice_Id];
-    int end   = row_ptr[vertice_Id + 1];
+
+    int start = sparse_row_ptr[sparse_idx];
+    int end   = sparse_row_ptr[sparse_idx + 1];
     int len   = end - start;
- 
-	// ── Warp-strided accumulation with hub constant-memory optimization ──
-	float local_sum = 0.0f;
-	for (int k = lane; k < len; k += 32) {
-	    int neighbor_id = col_idx[start + k];
-	    float neighbor_spin;
-	    
-	    // Check if neighbor is a hub — read from constant memory if so
-	    int hub_idx = find_hub_index(neighbor_id);
-	    if (hub_idx >= 0) {
-	        neighbor_spin = (float)c_hub_spin_vals[hub_idx];  // constant memory (L1 cached)
-	    } else {
-	        neighbor_spin = (float)gpuLatSpin[neighbor_id];   // global memory
-	    }
-	    
-	    local_sum += J_values[start + k] * neighbor_spin;
-	}
- 
-    // ── Warp-shuffle reduction (no shared mem, no __syncthreads)
-    // GH100: full warp mask, single-cycle shuffle
+
+    float local_sum = 0.0f;
+    for (int k = lane; k < len; k += 32) {
+        int e = sparse_col_idx_tagged[start + k];
+        float neighbor_spin;
+        if (e < 0) {
+            // Hot path: high bit set => hub index into shared cache.
+            neighbor_spin = (float)s_hub_vals[e & HUB_IDX_MASK];
+        } else {
+            // Rare fallback: non-hub neighbor, read straight from global.
+            neighbor_spin = (float)gpuLatSpin[e];
+        }
+        local_sum += sparse_J_values[start + k] * neighbor_spin;
+    }
+
+    // Warp-shuffle reduction.
     unsigned mask = 0xFFFFFFFFu;
     local_sum += __shfl_down_sync(mask, local_sum, 16);
     local_sum += __shfl_down_sync(mask, local_sum,  8);
     local_sum += __shfl_down_sync(mask, local_sum,  4);
     local_sum += __shfl_down_sync(mask, local_sum,  2);
     local_sum += __shfl_down_sync(mask, local_sum,  1);
-    // lane 0 now holds the complete neighbour sum
- 
+
     if (lane == 0) {
         float dE = -2.0f * (local_sum + gpuLinTermsVect[vertice_Id]) * current_spin;
         float acceptance = fminf(1.0f, expf(-beta * dE));
@@ -907,19 +1150,37 @@ __global__ void collectFlipCandidates_sparse(
 }
 
 
-__global__ void applySingleFlip(
-        signed char*   gpuLatSpin,
-        float*         d_total_energy,
-        FlipCandidate* candidates,
-        int            chosen_idx          // which candidate was selected
+// Apply every accepted flip collected during a single color pass.
+// Because all candidates come from one color class, no two share an edge,
+// so parallel flips cannot invalidate each other's dE — and the running
+// total-energy accumulator stays exact.
+__global__ void applyAllFlipsInColor(
+        signed char*         gpuLatSpin,
+        float*               d_total_energy,
+        const FlipCandidate* candidates,
+        const int*           num_candidates
 ){
-    // single thread is sufficient
-    if (threadIdx.x == 0 && blockIdx.x == 0) {
-        int   sid = candidates[chosen_idx].spin_id;
-        float dE  = candidates[chosen_idx].delta_energy;
-        gpuLatSpin[sid] = -gpuLatSpin[sid];
-        atomicAdd(d_total_energy, dE);
-    }
+    int t = blockIdx.x * blockDim.x + threadIdx.x;
+    int n = *num_candidates;
+    if (t >= n) return;
+    int   sid = candidates[t].spin_id;
+    float dE  = candidates[t].delta_energy;
+    gpuLatSpin[sid] = -gpuLatSpin[sid];
+    atomicAdd(d_total_energy, dE);
+}
+
+
+// Refresh the hub-values cache in global memory from the live spin array.
+// Runs after any color pass that may have flipped a hub.
+__global__ void refreshHubVals(
+        const signed char* gpuLatSpin,
+        const int*         d_hub_ids,
+        signed char*       d_hub_vals,
+        int                num_hubs
+){
+    int t = blockIdx.x * blockDim.x + threadIdx.x;
+    if (t < num_hubs)
+        d_hub_vals[t] = gpuLatSpin[d_hub_ids[t]];
 }
 
 // Initialize lattice spins
