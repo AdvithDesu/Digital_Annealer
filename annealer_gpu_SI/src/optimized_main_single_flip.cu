@@ -942,6 +942,11 @@ int main(int argc, char* argv[])
 
     signed char cpu_spins[num_spins];
 
+	// Snapshot the running (atomicAdd-tracked) energy before we overwrite it
+	// with a fresh from-scratch recomputation. Comparing the two is the
+	// correctness check for the chromatic parallel-flip accumulator.
+	float running_energy = gpu_total_energy[0];
+
 	gpuErrchk(cudaMemset(d_total_energy, 0, sizeof(float)));
 	{	
         final_spins_total_energy << < num_spins, THREADS >> > (gpu_row_ptr,
@@ -976,6 +981,14 @@ int main(int argc, char* argv[])
 
 	std::cout << "\t total energy value: " << gpu_total_energy[0] << std::endl;
 	printf("best engy %.1f \n", gpu_best_energy[0]);
+
+	{
+		float recomputed = gpu_total_energy[0];
+		float diff = running_energy - recomputed;
+		float denom = std::max(1.0f, std::fabs(recomputed));
+		printf("energy check: running=%.6f recomputed=%.6f diff=%.6f (rel=%.3e)\n",
+		       running_energy, recomputed, diff, diff / denom);
+	}
 
 	auto t_total_end = std::chrono::high_resolution_clock::now();
 	double t_total = (double)std::chrono::duration_cast<std::chrono::microseconds>(t_total_end - t_total_start).count() * 1e-6;
