@@ -21,7 +21,6 @@
 #include <cstdlib>
 
 #define THREADS 1024 //or more threads gpu crashes
-#define BREAK_UPDATE_VAL 2//1000
 #define TCRIT 2.26918531421f
 
 struct FlipCandidate {
@@ -46,8 +45,6 @@ struct FlipCandidate {
 
 #include "utils.hpp"
 
-#define CHANGE_MAX_ENERGY 0.0f
-#define BREAK_AFTER_ITERATION 1.0f
 //__constant__ float kd_floats[1000000];
 
 
@@ -359,9 +356,6 @@ static void usage(const char *pname) {
 		"\t-s|--debug \n"
 		"\t\t Print the final lattice value at every temperature\n"
 		"\n"
-		"\t-e|--no-early-stop\n"
-		"\t\tDisable early stopping - run full annealing schedule\n"
-		"\n"
 		"\t-o|--write-lattice\n"
 		"\t\twrite final lattice configuration to file\n\n",
 		bname);
@@ -387,7 +381,6 @@ int main(int argc, char* argv[])
 	
 	// bool do_write = false;
 	bool debug = false;
-	bool disable_early_stop = false;
 	
 	std::vector<int64_t> energy_history;  // Store best energy at each iteration
 	
@@ -407,13 +400,12 @@ int main(int argc, char* argv[])
 			{ "sweeps_per_beta", required_argument, 0, 'm'},
 			{ "write-lattice",       no_argument, 0, 'o'},
 			{          "debug",       no_argument, 0, 'd'},
-			{ "no-early-stop",       no_argument, 0, 'e'},
 			{          "help",       no_argument, 0, 'h'},
 			{               0,                 0, 0,   0}
 		};
 
 		int option_index = 0;
-		int ch = getopt_long(argc, argv, "R:C:V:l:x:y:s:c:n:m:odeh", long_options, &option_index);
+		int ch = getopt_long(argc, argv, "R:C:V:l:x:y:s:c:n:m:odh", long_options, &option_index);
 		if (ch == -1) break;
 
 		switch (ch) {
@@ -446,8 +438,6 @@ int main(int argc, char* argv[])
 			//do_write = true; break;
  		case 'd':
 			debug = true; break;
-		case 'e':
-		    disable_early_stop = true; break;
 		case 'h':
 			usage(argv[0]); break;
 		case '?':
@@ -804,11 +794,7 @@ int main(int argc, char* argv[])
 	std::vector<double> beta_schedule = create_beta_schedule_geometric(num_temps, start_temp, stop_temp, alpha);
 
 	auto t0 = std::chrono::high_resolution_clock::now();
-	auto annealing_start = std::chrono::high_resolution_clock::now(); 
-
-	// Previous-iteration best energy used for coarse early-stop tracking.
-	int64_t prev_best = gpu_best_energy[0];
-	int no_update = 0;
+	auto annealing_start = std::chrono::high_resolution_clock::now();
 
 	// Temperature loop
 	for (int i = 0; i < (int)beta_schedule.size(); i++) {
@@ -889,18 +875,6 @@ int main(int argc, char* argv[])
 		                     sizeof(int64_t), cudaMemcpyDeviceToHost));
 		gpu_best_energy[0] = std::min(gpu_total_energy[0], gpu_best_energy[0]);
 		energy_history.push_back(gpu_best_energy[0]);
-
-		// Coarse early stopping: count temperatures with no best-energy improvement.
-		if (gpu_best_energy[0] < prev_best) {
-		    no_update = 0;
-		    prev_best = gpu_best_energy[0];
-		} else {
-		    no_update++;
-		}
-		if (!disable_early_stop && no_update > (int)BREAK_AFTER_ITERATION * 10) {
-		    printf("Breaking early at temperature iteration %d\n", i);
-		    break;
-		}
 	}
  
 	auto t1 = std::chrono::high_resolution_clock::now();

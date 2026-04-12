@@ -13,7 +13,6 @@
 #   -c, --alpha      <a>   geometric cooling rate     (default: 0.95)
 #   -m, --sweeps     <M>   sweeps per beta            (default: 10)
 #   -s, --seed       <S>   RNG seed                   (default: auto)
-#   -e, --no-early-stop    disable early termination
 #   -d, --debug            enable debug output from the binary
 
 set -euo pipefail
@@ -27,7 +26,6 @@ STOP_TEMP=0.1
 ALPHA=0.95
 SWEEPS=10
 SEED=""
-EARLY_STOP_FLAG=""
 DEBUG_FLAG=""
 
 if [[ $# -lt 1 ]]; then
@@ -51,7 +49,6 @@ while [[ $# -gt 0 ]]; do
         -c|--alpha)        ALPHA="$2";        shift 2 ;;
         -m|--sweeps)       SWEEPS="$2";       shift 2 ;;
         -s|--seed)         SEED="$2";         shift 2 ;;
-        -e|--no-early-stop) EARLY_STOP_FLAG="-e"; shift ;;
         -d|--debug)        DEBUG_FLAG="-d";   shift ;;
         *) echo "Unknown option: $1" >&2; exit 1 ;;
     esac
@@ -76,9 +73,8 @@ fi
 
 CMD=("$BINARY" -R "$R" -C "$C" -V "$V" -l "$H"
      -x "$START_TEMP" -y "$STOP_TEMP" -c "$ALPHA" -m "$SWEEPS")
-[[ -n "$SEED" ]]            && CMD+=(-s "$SEED")
-[[ -n "$EARLY_STOP_FLAG" ]] && CMD+=("$EARLY_STOP_FLAG")
-[[ -n "$DEBUG_FLAG" ]]      && CMD+=("$DEBUG_FLAG")
+[[ -n "$SEED" ]]       && CMD+=(-s "$SEED")
+[[ -n "$DEBUG_FLAG" ]] && CMD+=("$DEBUG_FLAG")
 
 echo "===== Running N=$N ====="
 echo "Command: ${CMD[*]}"
