@@ -341,11 +341,11 @@ static void usage(const char *pname) {
 		"\t-s|--seed <SEED>\n"
 		"\t\tfix the starting point\n"
 		"\n"
-		"\t-s|--debug \n"
-		"\t\t Print the final lattice value at every temperature\n"
+		"\t-d|--debug \n"
+		"\t\t Print debug output\n"
 		"\n"
-		"\t-o|--write-lattice\n"
-		"\t\twrite final lattice configuration to file\n\n",
+		"\t-O|--output-dir <DIR>\n"
+		"\t\tdirectory for output files (spins, energy history)\n\n",
 		bname);
 	exit(EXIT_SUCCESS);
 }
@@ -367,7 +367,7 @@ int main(int argc, char* argv[])
 	unsigned int num_temps = 1000; //atoi(argv[2]);
 	unsigned int num_sweeps_per_beta = 1;//atoi(argv[3]);
 	
-	// bool do_write = false;
+	std::string output_dir = "";
 	bool debug = false;
 	
 	std::vector<double> energy_history;  // Store best energy at each iteration
@@ -386,14 +386,14 @@ int main(int argc, char* argv[])
 			{ "alpha", required_argument, 0, 'c'},
 			{        "niters", required_argument, 0, 'n'},
 			{ "sweeps_per_beta", required_argument, 0, 'm'},
-			{ "write-lattice",       no_argument, 0, 'o'},
+			{ "output-dir", required_argument, 0, 'O'},
 			{          "debug",       no_argument, 0, 'd'},
 			{          "help",       no_argument, 0, 'h'},
 			{               0,                 0, 0,   0}
 		};
 
 		int option_index = 0;
-		int ch = getopt_long(argc, argv, "R:C:V:l:x:y:s:c:n:m:odh", long_options, &option_index);
+		int ch = getopt_long(argc, argv, "R:C:V:l:x:y:s:c:n:m:O:dh", long_options, &option_index);
 		if (ch == -1) break;
 
 		switch (ch) {
@@ -421,9 +421,11 @@ int main(int argc, char* argv[])
 			num_temps = atoi(optarg); break;
 		case 'm':
 			num_sweeps_per_beta = atoi(optarg); break;
-        //does not seem to be used
-		//case 'o':
-			//do_write = true; break;
+		case 'O':
+			output_dir = optarg;
+			if (!output_dir.empty() && output_dir.back() != '/')
+				output_dir += '/';
+			break;
  		case 'd':
 			debug = true; break;
 		case 'h':
@@ -874,16 +876,15 @@ int main(int argc, char* argv[])
 	double t_anneal = (double)std::chrono::duration_cast<std::chrono::microseconds>(annealing_end - annealing_start).count() * 1e-6;
 	printf("Total annealing time: %.6f seconds\n", t_anneal);
 
-	// Write energy history to file for plotting
-	std::string energy_filename = "energy_history_" + run_suffix;
-	
+	// Write energy history to file
+	std::string energy_filename = output_dir + "energy_history_" + run_suffix;
+
 	FILE* energy_fptr = fopen(energy_filename.c_str(), "w");
 	fprintf(energy_fptr, "# Iteration\tBest_Energy\n");
 	for (int i = 0; i < (int)energy_history.size(); i++){
 	    fprintf(energy_fptr, "%d\t%.6f\n", i, energy_history[i]);
 	}
 	fclose(energy_fptr);
-	// printf("Energy history written to: %s\n", energy_filename.c_str());
 
     signed char cpu_spins[num_spins];
 
@@ -912,16 +913,14 @@ int main(int argc, char* argv[])
         gpuErrchk(cudaMemcpy(cpu_spins, gpu_spins_old, num_spins * sizeof(signed char), cudaMemcpyDeviceToHost));
 	}
 
-	if(debug){
-		std::string spins_filename = "spins_" + run_suffix;
+	{
+		std::string spins_filename = output_dir + "spins_" + run_suffix;
 
 		FILE* fptr1 = fopen(spins_filename.c_str() , "w");
 		for(int i = 0; i < num_spins; i++){
 			fprintf(fptr1, "%d\t",  (int)cpu_spins[i]);
 		}
-
-		fprintf(fptr1,"\n\n\n");
-		fprintf(fptr1,"\ttotal energy value: %.6f\n", gpu_total_energy[0] );
+		fprintf(fptr1,"\n");
 		fclose(fptr1);
 	}
 

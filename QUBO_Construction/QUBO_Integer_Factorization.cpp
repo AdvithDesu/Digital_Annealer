@@ -1337,14 +1337,32 @@ std::vector<int> readSpinsFile(const std::string& filename) {
 // ============================================================
 int main(int argc, char* argv[]) {
     if (argc < 2) {
-        std::cerr << "Usage: " << argv[0] << " <N> [spins_file]\n";
+        std::cerr << "Usage: " << argv[0] << " <N> [spins_file] [--csr-dir DIR] [--meta-dir DIR]\n";
         std::cerr << "  Without spins_file: generate QUBO and save CSR files.\n";
         std::cerr << "  With spins_file:    generate QUBO, then post-process the annealer solution.\n";
+        std::cerr << "  --csr-dir DIR:      directory for CSR output files (default: cwd)\n";
+        std::cerr << "  --meta-dir DIR:     directory for metadata files (default: cwd)\n";
         return 1;
     }
 
-    uint128_t N = parseUint128(argv[1]);
-    std::string spinsFile = (argc >= 3) ? argv[2] : "";
+    // Parse positional and optional args
+    std::string Narg, spinsFile, csrDir, metaDir;
+    for (int i = 1; i < argc; i++) {
+        std::string a = argv[i];
+        if (a == "--csr-dir" && i + 1 < argc) { csrDir = argv[++i]; continue; }
+        if (a == "--meta-dir" && i + 1 < argc) { metaDir = argv[++i]; continue; }
+        if (Narg.empty()) Narg = a;
+        else if (spinsFile.empty()) spinsFile = a;
+    }
+    if (Narg.empty()) {
+        std::cerr << "ERROR: <N> argument is required.\n";
+        return 1;
+    }
+    // Ensure directory paths end with /
+    if (!csrDir.empty() && csrDir.back() != '/') csrDir += '/';
+    if (!metaDir.empty() && metaDir.back() != '/') metaDir += '/';
+
+    uint128_t N = parseUint128(Narg);
 
     auto t0 = std::chrono::high_resolution_clock::now();
 
@@ -1422,13 +1440,13 @@ int main(int argc, char* argv[]) {
 
     // Step 6: save outputs
     std::string Nstr = uint128ToString(N);
-    saveCSV("row_ptr_" + Nstr + ".csv",    ising.row_ptr);
-    saveCSV("col_idx_" + Nstr + ".csv",    ising.col_idx);
-    saveCSV("J_values_" + Nstr + ".csv",   ising.values);
-    saveHVector("h_vector_" + Nstr + ".csv", ising.h);
-    saveIndexToVar("index_to_var_" + Nstr + ".txt", activeVarNames, activeIdx);
-    saveAssignmentConstraints("assignment_constraints_" + Nstr + ".txt", sr.assignmentConstraints);
-    saveExpressionConstraints("expression_constraints_" + Nstr + ".txt", sr.expressionConstraints);
+    saveCSV(csrDir + "row_ptr_" + Nstr + ".csv",    ising.row_ptr);
+    saveCSV(csrDir + "col_idx_" + Nstr + ".csv",    ising.col_idx);
+    saveCSV(csrDir + "J_values_" + Nstr + ".csv",   ising.values);
+    saveHVector(csrDir + "h_vector_" + Nstr + ".csv", ising.h);
+    saveIndexToVar(metaDir + "index_to_var_" + Nstr + ".txt", activeVarNames, activeIdx);
+    saveAssignmentConstraints(metaDir + "assignment_constraints_" + Nstr + ".txt", sr.assignmentConstraints);
+    saveExpressionConstraints(metaDir + "expression_constraints_" + Nstr + ".txt", sr.expressionConstraints);
 
     // Print QUBO dict summary (first 20 entries)
     std::cout << "\nQUBO dict (first 20 non-zero entries):\n";
