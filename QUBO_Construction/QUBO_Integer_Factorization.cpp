@@ -112,6 +112,11 @@ double approxLog2_128(uint128_t n) {
 }
 
 // ============================================================
+// Global flags
+// ============================================================
+static bool G_enableBacktracking = false;  // disabled by default
+
+// ============================================================
 // Variable registry  (string name <-> int index)
 // ============================================================
 struct VarRegistry {
@@ -948,7 +953,9 @@ SimplifierResult clauseSimplifier(std::vector<Poly> clauses) {
     // Backtrack check: if Replacement ran but didn't lead to additional
     // value assignments (beyond what we had at the checkpoint), the merging
     // was unproductive — restore the pre-Replacement state.
-    if (checkpointSaved) {
+    // NOTE: backtracking reduces QUBO size but removes structural correlations
+    // between carry variables that SA relies on. Disabled by default.
+    if (checkpointSaved && G_enableBacktracking) {
         int finalAssigns = (int)result.assignmentConstraints.size();
         if (finalAssigns <= assignsAtCheckpoint) {
             // No new value assignments from Replacement — restore checkpoint
@@ -1337,11 +1344,12 @@ std::vector<int> readSpinsFile(const std::string& filename) {
 // ============================================================
 int main(int argc, char* argv[]) {
     if (argc < 2) {
-        std::cerr << "Usage: " << argv[0] << " <N> [spins_file] [--csr-dir DIR] [--meta-dir DIR]\n";
+        std::cerr << "Usage: " << argv[0] << " <N> [spins_file] [--csr-dir DIR] [--meta-dir DIR] [--backtrack]\n";
         std::cerr << "  Without spins_file: generate QUBO and save CSR files.\n";
         std::cerr << "  With spins_file:    generate QUBO, then post-process the annealer solution.\n";
         std::cerr << "  --csr-dir DIR:      directory for CSR output files (default: cwd)\n";
         std::cerr << "  --meta-dir DIR:     directory for metadata files (default: cwd)\n";
+        std::cerr << "  --backtrack:        enable replacement backtracking (smaller QUBO, harder for SA)\n";
         return 1;
     }
 
@@ -1351,6 +1359,7 @@ int main(int argc, char* argv[]) {
         std::string a = argv[i];
         if (a == "--csr-dir" && i + 1 < argc) { csrDir = argv[++i]; continue; }
         if (a == "--meta-dir" && i + 1 < argc) { metaDir = argv[++i]; continue; }
+        if (a == "--backtrack") { G_enableBacktracking = true; continue; }
         if (Narg.empty()) Narg = a;
         else if (spinsFile.empty()) spinsFile = a;
     }
