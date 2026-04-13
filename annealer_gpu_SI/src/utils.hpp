@@ -20,7 +20,7 @@ using std::string;
 double rtclock();
 void printtime(const char *str, double starttime, double endtime);
 
-void readLinearValues(const std::string& filename, unsigned int num_spins, std::vector<int64_t>& linearVect);
+void readLinearValues(const std::string& filename, unsigned int num_spins, std::vector<double>& linearVect);
 
 // =====================================================
 // Legacy dense J parser (UNCHANGED)
@@ -58,7 +58,7 @@ public:
     // Accessors
     const std::vector<int>&     getRowPtr()   const { return row_ptr; }
     const std::vector<int>&     getColIdx()   const { return col_idx; }
-    const std::vector<int64_t>& getValues()   const { return values; }
+    const std::vector<double>&  getValues()   const { return values; }
 
     unsigned int getNumSpins() const { return num_spins; }
     unsigned int getNNZ()      const { return nnz; }
@@ -66,13 +66,13 @@ public:
 private:
     std::vector<int>     row_ptr;
     std::vector<int>     col_idx;
-    std::vector<int64_t> values;
+    std::vector<double>  values;
 
     unsigned int num_spins = 0;
     unsigned int nnz = 0;
 
     void readIntCSV(const string& filename, std::vector<int>& out);
-    void readInt64CSV(const string& filename, std::vector<int64_t>& out);
+    void readDoubleCSV(const string& filename, std::vector<double>& out);
     void validate() const;
 };
 

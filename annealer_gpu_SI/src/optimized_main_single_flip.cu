@@ -16,16 +16,15 @@
 #include <algorithm>
 #include <numeric>
 #include <cassert>
-#include <cstdint>
-#include <cinttypes>
 #include <cstdlib>
+#include <cmath>
 
 #define THREADS 1024 //or more threads gpu crashes
 #define TCRIT 2.26918531421f
 
 struct FlipCandidate {
-    int     spin_id;
-    int64_t delta_energy;
+    int    spin_id;
+    double delta_energy;
 };
 
 // Bin thresholds // Spins with row-length >= DENSE_THRESHOLD  → Bin 0: 1 block / 1024 threads
@@ -91,7 +90,7 @@ struct ColoringTables {
 struct SparseCSR {
     std::vector<int>     row_ptr;           // size num_sparse+1
     std::vector<int>     col_idx_tagged;    // tagged per HUB_TAG_BIT
-    std::vector<int64_t> J_values;
+    std::vector<double>  J_values;
     std::vector<int>     global_id;         // size num_sparse; sparse-idx -> global spin id
     int                  num_sparse = 0;
     int                  nnz_hub_fallback = 0;
@@ -158,7 +157,7 @@ static std::vector<int> buildGreedyColoring(
 static SparseCSR buildSparseCSR(
     const std::vector<int>&     row_ptr,
     const std::vector<int>&     col_idx,
-    const std::vector<int64_t>& J_values,
+    const std::vector<double>&  J_values,
     const std::vector<int>&     dense_spins,
     const std::vector<int>&     sparse_spins,
     int                         num_spins)
@@ -181,8 +180,8 @@ static SparseCSR buildSparseCSR(
         int start = row_ptr[gid];
         int end   = row_ptr[gid + 1];
         for (int k = start; k < end; k++) {
-            int     nb = col_idx[k];
-            int64_t J  = J_values[k];
+            int    nb = col_idx[k];
+            double J  = J_values[k];
             int h = hub_map[nb];
             if (h >= 0) {
                 out.col_idx_tagged.push_back((int)(h | HUB_TAG_BIT));
@@ -239,15 +238,6 @@ static ColoringTables buildColoringTables(
     return ct;
 }
 
-// 1-thread kernel: divide an int64 accumulator by 2. Used to convert from
-// the doubled-energy intermediate produced by final_spins_total_energy
-// (per-spin contribution = s_i*field_i + 2*s_i*h_i) into the actual E.
-__global__ void halve_energy(int64_t* x)
-{
-    if (threadIdx.x == 0 && blockIdx.x == 0) x[0] /= 2;
-}
-
-
 // Spin-only init (forward decl)
 __global__ void init_spins_only(
 		const float* __restrict__ randvals,
@@ -256,25 +246,23 @@ __global__ void init_spins_only(
 		unsigned long             seed,
 		int                       num_spins);
 
-// Final lattice spins. Accumulates DOUBLED energy
-// (s_i*field_i + 2*s_i*h_i) per spin so the per-spin pieces are integers.
-// Caller must call halve_energy<<<1,1>>>(total_energy) afterward.
-__global__ void final_spins_total_energy(
+// Compute total energy E = ½ s'Js + h's from the current spin state.
+__global__ void compute_total_energy(
 		const int*           row_ptr,
 		const int*           col_idx,
-		const int64_t*       J_values,
-		const int64_t*       gpuLinTermsVect,
+		const double*        J_values,
+		const double*        gpuLinTermsVect,
 		signed char*         gpuSpins,
 		const unsigned int*  gpu_num_spins,
-		int64_t*             total_energy
+		double*              total_energy
 );
 
 
 __global__ void collectFlipCandidates_dense(
         const int*           row_ptr,
         const int*           col_idx,
-        const int64_t*       J_values,
-        const int64_t*       gpuLinTermsVect,
+        const double*        J_values,
+        const double*        gpuLinTermsVect,
         const float* __restrict__ randvals,
         signed char*         gpuLatSpin,
         const float          beta,
@@ -287,9 +275,9 @@ __global__ void collectFlipCandidates_dense(
 __global__ void collectFlipCandidates_sparse(
         const int*           sparse_row_ptr,
         const int*           sparse_col_idx_tagged,
-        const int64_t*       sparse_J_values,
+        const double*        sparse_J_values,
         const int*           sparse_global_id,
-        const int64_t*       gpuLinTermsVect,
+        const double*        gpuLinTermsVect,
         const float* __restrict__ randvals,
         signed char*         gpuLatSpin,
         const signed char*   d_hub_vals,
@@ -304,7 +292,7 @@ __global__ void collectFlipCandidates_sparse(
 
 __global__ void applyAllFlipsInColor(
         signed char*         gpuLatSpin,
-        int64_t*             d_total_energy,
+        double*              d_total_energy,
         const FlipCandidate* candidates,
         const int*           num_candidates
 );
@@ -382,7 +370,7 @@ int main(int argc, char* argv[])
 	// bool do_write = false;
 	bool debug = false;
 	
-	std::vector<int64_t> energy_history;  // Store best energy at each iteration
+	std::vector<double> energy_history;  // Store best energy at each iteration
 	
 	std::cout << "Start parsing the file " << std::endl;
 	
@@ -499,7 +487,7 @@ int main(int argc, char* argv[])
     std::cout << "ParseData constructed successfully" << std::endl;
 	unsigned int num_spins = parseSparse.getNumSpins();
 
-	std::vector<int64_t> linearTermsVect;
+	std::vector<double> linearTermsVect;
 	//if (linear_file.empty() == false)
     readLinearValues(linear_file, num_spins, linearTermsVect);
 
@@ -515,7 +503,7 @@ int main(int argc, char* argv[])
 	
 	const std::vector<int>&     row_ptr  = parseSparse.getRowPtr();
 	const std::vector<int>&     col_idx  = parseSparse.getColIdx();
-	const std::vector<int64_t>& J_values = parseSparse.getValues();
+	const std::vector<double>&  J_values = parseSparse.getValues();
 	
 	std::cout << "Sparse J loaded: num_spins = "
 	          << num_spins << ", nnz = " << nnz << std::endl;
@@ -609,7 +597,7 @@ int main(int argc, char* argv[])
 	// ── GPU uploads: sparse-only CSR ─────────────────────────────────────────
 	int     *gpu_sparse_row_ptr        = nullptr;
 	int     *gpu_sparse_col_idx_tagged = nullptr;
-	int64_t *gpu_sparse_J_values       = nullptr;
+	double  *gpu_sparse_J_values       = nullptr;
 	int     *gpu_sparse_global_id      = nullptr;
 	gpuErrchk(cudaMalloc((void**)&gpu_sparse_row_ptr,
 	                     (scsr.num_sparse + 1) * sizeof(int)));
@@ -622,9 +610,9 @@ int main(int argc, char* argv[])
 	                         scsr.col_idx_tagged.size() * sizeof(int),
 	                         cudaMemcpyHostToDevice));
 	    gpuErrchk(cudaMalloc((void**)&gpu_sparse_J_values,
-	                         scsr.J_values.size() * sizeof(int64_t)));
+	                         scsr.J_values.size() * sizeof(double)));
 	    gpuErrchk(cudaMemcpy(gpu_sparse_J_values, scsr.J_values.data(),
-	                         scsr.J_values.size() * sizeof(int64_t),
+	                         scsr.J_values.size() * sizeof(double),
 	                         cudaMemcpyHostToDevice));
 	}
 	if (scsr.num_sparse > 0) {
@@ -653,19 +641,19 @@ int main(int argc, char* argv[])
 	float *gpu_randvals;// same as spins
 	gpuErrchk(cudaMalloc((void**)&gpu_randvals, (num_spins) * sizeof(float)));
 
-	int64_t *gpuLinTermsVect;
-	gpuErrchk(cudaMalloc((void**)&gpuLinTermsVect, (num_spins) * sizeof(int64_t)));
+	double *gpuLinTermsVect;
+	gpuErrchk(cudaMalloc((void**)&gpuLinTermsVect, (num_spins) * sizeof(double)));
 
 	if (linearTermsVect.size() != num_spins)
 		std::cout << "	[ERROR] error in parsing the linear terms from file" << std::endl;
 
-	gpuErrchk(cudaMemcpy(gpuLinTermsVect, linearTermsVect.data(), (num_spins) * sizeof(int64_t), cudaMemcpyHostToDevice));
+	gpuErrchk(cudaMemcpy(gpuLinTermsVect, linearTermsVect.data(), (num_spins) * sizeof(double), cudaMemcpyHostToDevice));
 
 	// ---- Allocate sparse J (CSR format) on GPU ----
 
 	int*     gpu_row_ptr  = nullptr;
 	int*     gpu_col_idx  = nullptr;
-	int64_t* gpu_J_values = nullptr;
+	double*  gpu_J_values = nullptr;
 
 	starttime = rtclock();
 	
@@ -680,9 +668,9 @@ int main(int argc, char* argv[])
 	gpuErrchk(cudaMemcpy(gpu_col_idx, col_idx.data(), nnz * sizeof(int), cudaMemcpyHostToDevice));
 	
 	// J values
-	gpuErrchk(cudaMalloc((void**)&gpu_J_values, nnz * sizeof(int64_t)));
+	gpuErrchk(cudaMalloc((void**)&gpu_J_values, nnz * sizeof(double)));
 
-	gpuErrchk(cudaMemcpy(gpu_J_values, J_values.data(), nnz * sizeof(int64_t), cudaMemcpyHostToDevice));
+	gpuErrchk(cudaMemcpy(gpu_J_values, J_values.data(), nnz * sizeof(double), cudaMemcpyHostToDevice));
 
 	endtime = rtclock();
    
@@ -693,14 +681,14 @@ int main(int argc, char* argv[])
 	gpuErrchk(cudaMalloc((void**)&gpu_num_spins, sizeof(*gpu_num_spins)));
 	gpuErrchk(cudaMemcpy(gpu_num_spins, &num_spins, sizeof(*gpu_num_spins), cudaMemcpyHostToDevice));
 	
-	int64_t* gpu_total_energy;
-	cudaHostAlloc(&gpu_total_energy, sizeof(int64_t), 0);
+	double* gpu_total_energy;
+	cudaHostAlloc(&gpu_total_energy, sizeof(double), 0);
 
-	int64_t* d_total_energy;
-	gpuErrchk(cudaMalloc((void**)&d_total_energy, sizeof(int64_t)));
+	double* d_total_energy;
+	gpuErrchk(cudaMalloc((void**)&d_total_energy, sizeof(double)));
 
-	int64_t* gpu_best_energy;
-	cudaHostAlloc(&gpu_best_energy, sizeof(int64_t), 0);
+	double* gpu_best_energy;
+	cudaHostAlloc(&gpu_best_energy, sizeof(double), 0);
  
 	signed char *gpu_spins_old;
 	
@@ -740,7 +728,10 @@ int main(int argc, char* argv[])
  	
    	starttime = rtclock();
 
-	gpuErrchk(cudaMemset(d_total_energy, 0, sizeof(int64_t)));
+	{
+		double zero = 0.0;
+		gpuErrchk(cudaMemcpy(d_total_energy, &zero, sizeof(double), cudaMemcpyHostToDevice));
+	}
 
 	// Phase 1: initialize all spins. Must finish before any block reads
 	// a neighbor's spin, otherwise the energy compute races with the
@@ -754,8 +745,7 @@ int main(int argc, char* argv[])
 	cudaDeviceSynchronize();
 
 	// Phase 2: compute initial total energy from the now-stable spins.
-	// Kernel writes 2*E into d_total_energy; halve_energy fixes that up.
-	final_spins_total_energy<<<num_spins, THREADS>>>(
+	compute_total_energy<<<num_spins, THREADS>>>(
 		gpu_row_ptr,
 		gpu_col_idx,
 		gpu_J_values,
@@ -763,11 +753,10 @@ int main(int argc, char* argv[])
 		gpu_spins_old,
 		gpu_num_spins,
 		d_total_energy);
-	halve_energy<<<1, 1>>>(d_total_energy);
 
 	cudaDeviceSynchronize();
 
-	gpuErrchk(cudaMemcpy(gpu_total_energy, d_total_energy, sizeof(int64_t), cudaMemcpyDeviceToHost));
+	gpuErrchk(cudaMemcpy(gpu_total_energy, d_total_energy, sizeof(double), cudaMemcpyDeviceToHost));
       
  	endtime = rtclock();
 
@@ -784,7 +773,7 @@ int main(int argc, char* argv[])
 
 	gpu_best_energy[0] = gpu_total_energy[0];
 
-	// d_total_energy already holds the correct initial value (after halve_energy);
+	// d_total_energy already holds the correct initial value;
 	// applyAllFlipsInColor atomicAdds dE onto it incrementally from here.
 
 	auto t_setup_end = std::chrono::high_resolution_clock::now();
@@ -872,7 +861,7 @@ int main(int argc, char* argv[])
 		// One host sync per temperature iteration.
 		cudaDeviceSynchronize();
 		gpuErrchk(cudaMemcpy(gpu_total_energy, d_total_energy,
-		                     sizeof(int64_t), cudaMemcpyDeviceToHost));
+		                     sizeof(double), cudaMemcpyDeviceToHost));
 		gpu_best_energy[0] = std::min(gpu_total_energy[0], gpu_best_energy[0]);
 		energy_history.push_back(gpu_best_energy[0]);
 	}
@@ -891,7 +880,7 @@ int main(int argc, char* argv[])
 	FILE* energy_fptr = fopen(energy_filename.c_str(), "w");
 	fprintf(energy_fptr, "# Iteration\tBest_Energy\n");
 	for (int i = 0; i < (int)energy_history.size(); i++){
-	    fprintf(energy_fptr, "%d\t%" PRId64 "\n", i, energy_history[i]);
+	    fprintf(energy_fptr, "%d\t%.6f\n", i, energy_history[i]);
 	}
 	fclose(energy_fptr);
 	// printf("Energy history written to: %s\n", energy_filename.c_str());
@@ -901,11 +890,14 @@ int main(int argc, char* argv[])
 	// Snapshot the running (atomicAdd-tracked) energy before we overwrite it
 	// with a fresh from-scratch recomputation. Comparing the two is the
 	// correctness check for the chromatic parallel-flip accumulator.
-	int64_t running_energy = gpu_total_energy[0];
+	double running_energy = gpu_total_energy[0];
 
-	gpuErrchk(cudaMemset(d_total_energy, 0, sizeof(int64_t)));
 	{
-        final_spins_total_energy << < num_spins, THREADS >> > (gpu_row_ptr,
+		double zero = 0.0;
+		gpuErrchk(cudaMemcpy(d_total_energy, &zero, sizeof(double), cudaMemcpyHostToDevice));
+	}
+	{
+        compute_total_energy<<<num_spins, THREADS>>>(gpu_row_ptr,
 				gpu_col_idx,
 				gpu_J_values,
 				gpuLinTermsVect,
@@ -913,11 +905,10 @@ int main(int argc, char* argv[])
 				gpu_num_spins,
 				d_total_energy
 		);
-		halve_energy<<<1, 1>>>(d_total_energy);
 
   		cudaDeviceSynchronize();
 
-	    gpuErrchk(cudaMemcpy(gpu_total_energy, d_total_energy, sizeof(int64_t), cudaMemcpyDeviceToHost));
+	    gpuErrchk(cudaMemcpy(gpu_total_energy, d_total_energy, sizeof(double), cudaMemcpyDeviceToHost));
         gpuErrchk(cudaMemcpy(cpu_spins, gpu_spins_old, num_spins * sizeof(signed char), cudaMemcpyDeviceToHost));
 	}
 
@@ -930,21 +921,21 @@ int main(int argc, char* argv[])
 		}
 
 		fprintf(fptr1,"\n\n\n");
-		fprintf(fptr1,"\ttotal energy value: %" PRId64 "\n", gpu_total_energy[0] );
+		fprintf(fptr1,"\ttotal energy value: %.6f\n", gpu_total_energy[0] );
 		fclose(fptr1);
 	}
 
-	printf("\t total energy value: %" PRId64 "\n", gpu_total_energy[0]);
-	printf("best engy %" PRId64 "\n", gpu_best_energy[0]);
+	printf("\t total energy value: %.6f\n", gpu_total_energy[0]);
+	printf("best engy %.6f\n", gpu_best_energy[0]);
 
 	{
-		int64_t recomputed = gpu_total_energy[0];
-		int64_t diff = running_energy - recomputed;
-		int64_t denom = std::max<int64_t>(1, recomputed < 0 ? -recomputed : recomputed);
-		printf("energy check: running=%" PRId64 " recomputed=%" PRId64
-		       " diff=%" PRId64 " (rel=%.3e)\n",
+		double recomputed = gpu_total_energy[0];
+		double diff = running_energy - recomputed;
+		double denom = std::max(1.0, std::fabs(recomputed));
+		printf("energy check: running=%.6f recomputed=%.6f"
+		       " diff=%.6f (rel=%.3e)\n",
 		       running_energy, recomputed, diff,
-		       (double)diff / (double)denom);
+		       diff / denom);
 	}
 
 	auto t_total_end = std::chrono::high_resolution_clock::now();
@@ -996,8 +987,8 @@ int main(int argc, char* argv[])
 __global__ void collectFlipCandidates_dense(
         const int*     row_ptr,
         const int*     col_idx,
-        const int64_t* J_values,
-        const int64_t* gpuLinTermsVect,
+        const double*  J_values,
+        const double*  gpuLinTermsVect,
         const float* __restrict__ randvals,
         signed char*   gpuLatSpin,
         const float    beta,
@@ -1008,8 +999,8 @@ __global__ void collectFlipCandidates_dense(
     int vertice_Id = dense_spin_ids[blockIdx.x];   // global spin index
     int p_Id       = threadIdx.x;
 
-    __shared__ int64_t sh_mem[THREADS];
-    sh_mem[p_Id] = 0;
+    __shared__ double sh_mem[THREADS];
+    sh_mem[p_Id] = 0.0;
     __syncthreads();
 
     int current_spin = (int)gpuLatSpin[vertice_Id];
@@ -1018,7 +1009,7 @@ __global__ void collectFlipCandidates_dense(
     int end   = row_ptr[vertice_Id + 1];
 
     for (int k = start + p_Id; k < end; k += blockDim.x)
-        sh_mem[p_Id] += J_values[k] * (int64_t)gpuLatSpin[col_idx[k]];
+        sh_mem[p_Id] += J_values[k] * (double)gpuLatSpin[col_idx[k]];
     __syncthreads();
 
     // Standard shared-memory tree reduction
@@ -1028,8 +1019,8 @@ __global__ void collectFlipCandidates_dense(
     }
 
     if (p_Id == 0) {
-        int64_t dE = (int64_t)-2 * (int64_t)current_spin
-                     * (sh_mem[0] + gpuLinTermsVect[vertice_Id]);
+        double dE = -2.0 * (double)current_spin
+                    * (sh_mem[0] + gpuLinTermsVect[vertice_Id]);
         float acceptance = fminf(1.0f, expf(-beta * (float)dE));
 
         if (randvals[vertice_Id] < acceptance) {
@@ -1052,9 +1043,9 @@ __global__ void collectFlipCandidates_dense(
 __global__ void collectFlipCandidates_sparse(
         const int*          sparse_row_ptr,
         const int*          sparse_col_idx_tagged,
-        const int64_t*      sparse_J_values,
+        const double*       sparse_J_values,
         const int*          sparse_global_id,
-        const int64_t*      gpuLinTermsVect,
+        const double*       gpuLinTermsVect,
         const float* __restrict__ randvals,
         signed char*        gpuLatSpin,
         const signed char*  d_hub_vals,
@@ -1087,7 +1078,7 @@ __global__ void collectFlipCandidates_sparse(
     int end   = sparse_row_ptr[sparse_idx + 1];
     int len   = end - start;
 
-    int64_t local_sum = 0;
+    double local_sum = 0.0;
     for (int k = lane; k < len; k += 32) {
         int e = sparse_col_idx_tagged[start + k];
         int neighbor_spin;
@@ -1098,10 +1089,10 @@ __global__ void collectFlipCandidates_sparse(
             // Rare fallback: non-hub neighbor, read straight from global.
             neighbor_spin = (int)gpuLatSpin[e];
         }
-        local_sum += sparse_J_values[start + k] * (int64_t)neighbor_spin;
+        local_sum += sparse_J_values[start + k] * (double)neighbor_spin;
     }
 
-    // Warp-shuffle reduction (int64).
+    // Warp-shuffle reduction (double).
     unsigned mask = 0xFFFFFFFFu;
     local_sum += __shfl_down_sync(mask, local_sum, 16);
     local_sum += __shfl_down_sync(mask, local_sum,  8);
@@ -1110,8 +1101,8 @@ __global__ void collectFlipCandidates_sparse(
     local_sum += __shfl_down_sync(mask, local_sum,  1);
 
     if (lane == 0) {
-        int64_t dE = (int64_t)-2 * (int64_t)current_spin
-                     * (local_sum + gpuLinTermsVect[vertice_Id]);
+        double dE = -2.0 * (double)current_spin
+                    * (local_sum + gpuLinTermsVect[vertice_Id]);
         float acceptance = fminf(1.0f, expf(-beta * (float)dE));
         if (randvals[vertice_Id] < acceptance) {
             int idx = atomicAdd(num_candidates, 1);
@@ -1128,21 +1119,17 @@ __global__ void collectFlipCandidates_sparse(
 // total-energy accumulator stays exact.
 __global__ void applyAllFlipsInColor(
         signed char*         gpuLatSpin,
-        int64_t*             d_total_energy,
+        double*              d_total_energy,
         const FlipCandidate* candidates,
         const int*           num_candidates
 ){
     int t = blockIdx.x * blockDim.x + threadIdx.x;
     int n = *num_candidates;
     if (t >= n) return;
-    int     sid = candidates[t].spin_id;
-    int64_t dE  = candidates[t].delta_energy;
+    int    sid = candidates[t].spin_id;
+    double dE  = candidates[t].delta_energy;
     gpuLatSpin[sid] = -gpuLatSpin[sid];
-    // CUDA atomicAdd has no signed-int64 overload, but unsigned long long
-    // wraps the same bit pattern under two's complement, so reinterpret-cast
-    // is exact for signed addition.
-    atomicAdd(reinterpret_cast<unsigned long long*>(d_total_energy),
-              (unsigned long long)dE);
+    atomicAdd(d_total_energy, dE);
 }
 
 
@@ -1175,52 +1162,46 @@ __global__ void init_spins_only(
     curand_init(seed, i, 0, &state[i]);
 }
 
-// FINAL lattice energy. Per-spin contribution to (½ s'Js + h's) is not
-// generally an integer, so we accumulate the DOUBLED energy
-//   2*E = Σ_i (s_i * field_i + 2*s_i*h_i)
-// and the host (or halve_energy<<<1,1>>>) divides by 2 afterward.
-__global__ void final_spins_total_energy(
+// Compute total energy E = ½ s'Js + h's from the current spin state.
+// Each block handles one spin: computes field_i = Σ_j J_ij s_j via shared
+// reduction, then atomicAdds ½*s_i*field_i + s_i*h_i into total_energy.
+__global__ void compute_total_energy(
 		const int*           row_ptr,
 	    const int*           col_idx,
-	    const int64_t*       J_values,
-		const int64_t*       gpuLinTermsVect,
+	    const double*        J_values,
+		const double*        gpuLinTermsVect,
 		signed char*         gpuSpins,
 		const unsigned int*  gpu_num_spins,
-		int64_t*             total_energy){
+		double*              total_energy){
 
-	unsigned int vertice_Id = blockIdx.x;  // actual spin id in this threadBlock
-	unsigned int p_Id = threadIdx.x;  // which worker id
+	unsigned int vertice_Id = blockIdx.x;
+	unsigned int p_Id = threadIdx.x;
 
-	__shared__ int64_t sh_mem_spins_Energy[THREADS];
-	sh_mem_spins_Energy[p_Id] = 0;
+	__shared__ double sh_mem[THREADS];
+	sh_mem[p_Id] = 0.0;
 	__syncthreads();
 
-	// --- Sparse adjacency traversal: integer field accumulation ---
 	int start = row_ptr[vertice_Id];
 	int end   = row_ptr[vertice_Id + 1];
 
 	for (int k = start + p_Id; k < end; k += blockDim.x){
-	    int j = col_idx[k];
-	    int64_t Jij = J_values[k];
-	    sh_mem_spins_Energy[p_Id] += Jij * (int64_t)gpuSpins[j];
+	    sh_mem[p_Id] += J_values[k] * (double)gpuSpins[col_idx[k]];
 	}
 	__syncthreads();
 
 	for (int off = blockDim.x / 2; off; off /= 2){
 		if (threadIdx.x < off){
-			sh_mem_spins_Energy[threadIdx.x] += sh_mem_spins_Energy[threadIdx.x + off];
+			sh_mem[threadIdx.x] += sh_mem[threadIdx.x + off];
 		}
 		__syncthreads();
 	}
 
 	if (p_Id == 0){
-		int64_t current_spin = (int64_t)gpuSpins[vertice_Id];
-		// 2 * vertice_energy = s_i*field_i + 2*s_i*h_i (always integer).
-		int64_t two_vertice_energy =
-		    current_spin * sh_mem_spins_Energy[0]
-		  + (int64_t)2 * current_spin * gpuLinTermsVect[vertice_Id];
-		atomicAdd(reinterpret_cast<unsigned long long*>(total_energy),
-		          (unsigned long long)two_vertice_energy);
+		double s_i = (double)gpuSpins[vertice_Id];
+		// E_i = ½ * s_i * field_i + s_i * h_i
+		double vertice_energy = 0.5 * s_i * sh_mem[0]
+		                      + s_i * gpuLinTermsVect[vertice_Id];
+		atomicAdd(total_energy, vertice_energy);
 	}
 }
 

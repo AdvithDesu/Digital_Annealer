@@ -1,7 +1,5 @@
 // ==== utils.cc ====
 #include "utils.hpp"
-#include <cmath>
-#include <cstdint>
 
 using std::vector;
 
@@ -21,36 +19,34 @@ void printtime(const char *str, double starttime, double endtime)
 
 void readLinearValues(const std::string& filename,
                       unsigned int num_spins,
-                      std::vector<int64_t>& linearVect)
+                      std::vector<double>& linearVect)
 {
     if (filename.empty()) {
-        linearVect.assign(num_spins, 0);
+        linearVect.assign(num_spins, 0.0);
         return;
     }
 
     std::ifstream file(filename);
     if (!file.is_open()) {
         std::cerr << "WARNING: Could not open h file. Using zeros.\n";
-        linearVect.assign(num_spins, 0);
+        linearVect.assign(num_spins, 0.0);
         return;
     }
 
-    std::vector<int64_t> vals;
+    std::vector<double> vals;
     std::string line;
 
-    // Parse via double then llround so input like "1.234e+10" still maps
-    // to a clean integer (we already require values to be integer-valued).
     while (std::getline(file, line)) {
         if (line.empty()) continue;
         std::stringstream ss(line);
         std::string val;
         while (std::getline(ss, val, ',')) {
             if (!val.empty())
-                vals.push_back((int64_t)std::llround(std::stod(val)));
+                vals.push_back(std::stod(val));
         }
     }
 
-    if (vals.size() < num_spins) vals.resize(num_spins, 0);
+    if (vals.size() < num_spins) vals.resize(num_spins, 0.0);
     if (vals.size() > num_spins) vals.resize(num_spins);
 
     linearVect = vals;
@@ -169,7 +165,7 @@ ParseSparseData::ParseSparseData(const string& row_ptr_file,
 {
     readIntCSV(row_ptr_file, row_ptr);
     readIntCSV(col_idx_file, col_idx);
-    readInt64CSV(values_file, values);
+    readDoubleCSV(values_file, values);
 
     validate();
 }
@@ -196,8 +192,8 @@ void ParseSparseData::readIntCSV(const string& filename,
     }
 }
 
-void ParseSparseData::readInt64CSV(const string& filename,
-                                   std::vector<int64_t>& out)
+void ParseSparseData::readDoubleCSV(const string& filename,
+                                    std::vector<double>& out)
 {
     std::ifstream file(filename);
     if (!file.is_open()) {
@@ -213,9 +209,7 @@ void ParseSparseData::readInt64CSV(const string& filename,
         string val;
         while (std::getline(ss, val, ',')) {
             if (val.empty()) continue;
-            // Parse via double then llround so "1.23e+10" style entries
-            // still produce a clean integer.
-            out.push_back((int64_t)std::llround(std::stod(val)));
+            out.push_back(std::stod(val));
         }
     }
 }
