@@ -1146,7 +1146,7 @@ IsingCSR quboToIsingCSR(const QUBODict& Q, int numVars) {
             ising.h[i] += 0.5 * val;
             ising.offset += 0.5 * val;
         } else {
-            double Jij = val / 2.0;
+            double Jij = val / 4.0;
             adj[i].push_back({j, Jij});
             ising.h[i] += 0.5 * val;
             ising.offset += 0.25 * val;
