@@ -64,13 +64,24 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# ── Verify binaries exist ────────────────────────────────────
-for bin in "$QUBO_BIN" "$SA_BIN"; do
-    if [[ ! -x "$bin" ]]; then
-        echo "ERROR: binary not found or not executable: $bin" >&2
+# ── Build binaries if needed ─────────────────────────────────
+if [[ ! -x "$QUBO_BIN" ]]; then
+    echo "Building QUBO construction binary..."
+    g++ -O2 -std=c++17 -o "$QUBO_BIN" QUBO_Construction/QUBO_Integer_Factorization.cpp
+    echo "Built: $QUBO_BIN"
+fi
+
+if [[ ! -x "$SA_BIN" ]]; then
+    echo "Building SA binary (cmake + make)..."
+    mkdir -p build
+    cmake -S . -B build
+    make -C build -j"$(nproc)"
+    if [[ ! -x "$SA_BIN" ]]; then
+        echo "ERROR: SA build failed, binary not found: $SA_BIN" >&2
         exit 1
     fi
-done
+    echo "Built: $SA_BIN"
+fi
 
 # ── Create output directories ────────────────────────────────
 mkdir -p "$CSR_DIR"
