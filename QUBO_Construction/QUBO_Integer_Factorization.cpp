@@ -1322,6 +1322,124 @@ void postProcess(const std::vector<int>& quboSolution,
 }
 
 // ============================================================
+// Verify QUBO correctness: given known factors P and Q, check
+// that all clauses evaluate to zero.
+// ============================================================
+void verifyQUBO(uint128_t P, uint128_t Q, uint128_t N,
+                int n_p, int n_q,
+                const SimplifierResult& sr,
+                const std::vector<Poly>& originalClauses) {
+    std::cout << "\n=== QUBO Verification ===\n";
+    std::cout << "P = " << P << ", Q = " << Q << ", P*Q = " << (P*Q) << "\n";
+    if (P * Q != N) {
+        std::cout << "ERROR: P*Q != N (" << N << ")\n";
+        return;
+    }
+
+    // Build full variable assignment from known P, Q
+    std::map<int, int> assign;  // varIdx -> value
+
+    // Assign p_i and q_i bits
+    for (int i = 0; i < n_p; i++) {
+        int bit = (int)((P >> i) & 1);
+        auto it = G_vars.nameToIdx.find("p_" + std::to_string(i));
+        if (it != G_vars.nameToIdx.end())
+            assign[it->second] = bit;
+    }
+    for (int i = 0; i < n_q; i++) {
+        int bit = (int)((Q >> i) & 1);
+        auto it = G_vars.nameToIdx.find("q_" + std::to_string(i));
+        if (it != G_vars.nameToIdx.end())
+            assign[it->second] = bit;
+    }
+
+    // Compute correct carry values from column arithmetic
+    int n_m = n_p + n_q;
+    std::vector<int> Nbits(n_m, 0);
+    for (int i = 0; i < n_m; i++) Nbits[i] = (int)((N >> i) & 1);
+
+    // For each column, compute the sum and determine carries
+    std::map<std::pair<int,int>, int> carryVals;
+    for (int col = 1; col < n_m; col++) {
+        int64_t colSum = 0;
+        // Product terms p_j * q_{col-j}
+        for (int j = 0; j < n_p; j++) {
+            int qidx = col - j;
+            if (qidx >= 0 && qidx < n_q) {
+                int pbit = (int)((P >> j) & 1);
+                int qbit = (int)((Q >> qidx) & 1);
+                colSum += pbit * qbit;
+            }
+        }
+        // Input carries
+        for (int k = 1; k < col; k++) {
+            auto it = carryVals.find({k, col});
+            if (it != carryVals.end())
+                colSum += it->second;
+        }
+        // colSum should produce N_bits[col] as LSB and carries
+        // N_bits[col] = (colSum) mod 2 (this should match)
+        int64_t remaining = colSum - Nbits[col];
+        // remaining should be even, and remaining/2 is the carry out
+        if (remaining % 2 != 0) {
+            std::cout << "WARNING: column " << col << " has odd remainder " << remaining << "\n";
+        }
+        int64_t carryOut = remaining / 2;
+
+        // Distribute carry bits
+        for (int j = 1; col + j < n_m; j++) {
+            int bit = (int)(carryOut & 1);
+            carryOut >>= 1;
+            auto key = std::make_pair(col, col + j);
+            carryVals[key] = bit;
+            std::string nm = "s_" + std::to_string(col) + "_" + std::to_string(col + j);
+            auto it = G_vars.nameToIdx.find(nm);
+            if (it != G_vars.nameToIdx.end())
+                assign[it->second] = bit;
+        }
+    }
+
+    // Evaluate each original clause at the correct assignment
+    std::cout << "Evaluating " << originalClauses.size() << " original clauses:\n";
+    bool allZero = true;
+    for (int ci = 0; ci < (int)originalClauses.size(); ci++) {
+        Poly evaluated = originalClauses[ci];
+        for (auto& [varIdx, val] : assign)
+            evaluated = polySub1(evaluated, varIdx, val);
+        int128_t value = getConst(evaluated);
+        int freeCount = (int)freeVars(evaluated).size();
+        if (value != 0 || freeCount > 0) {
+            std::cout << "  Clause " << ci << ": value=" << value
+                      << " freeVars=" << freeCount << "\n";
+            allZero = false;
+        }
+    }
+    if (allZero)
+        std::cout << "  ALL clauses = 0 at correct solution. QUBO is CORRECT.\n";
+
+    // Also evaluate simplified clauses
+    std::cout << "Evaluating " << sr.clauses.size() << " simplified clauses:\n";
+    bool allZero2 = true;
+    for (int ci = 0; ci < (int)sr.clauses.size(); ci++) {
+        if (isZero(sr.clauses[ci])) continue;
+        Poly evaluated = sr.clauses[ci];
+        for (auto& [varIdx, val] : assign)
+            evaluated = polySub1(evaluated, varIdx, val);
+        int128_t value = getConst(evaluated);
+        int freeCount = (int)freeVars(evaluated).size();
+        if (value != 0 || freeCount > 0) {
+            std::cout << "  Simplified clause " << ci << ": value=" << value
+                      << " freeVars=" << freeCount << "\n";
+            allZero2 = false;
+        }
+    }
+    if (allZero2)
+        std::cout << "  ALL simplified clauses = 0 at correct solution. Simplification is CORRECT.\n";
+    else
+        std::cout << "  WARNING: Some simplified clauses are non-zero! Possible simplification bug.\n";
+}
+
+// ============================================================
 // Read Ising spins file (tab-separated +1/-1 on first line)
 // and convert to QUBO binary (0/1).
 // ============================================================
@@ -1350,16 +1468,18 @@ int main(int argc, char* argv[]) {
         std::cerr << "  --csr-dir DIR:      directory for CSR output files (default: cwd)\n";
         std::cerr << "  --meta-dir DIR:     directory for metadata files (default: cwd)\n";
         std::cerr << "  --backtrack:        enable replacement backtracking (smaller QUBO, harder for SA)\n";
+        std::cerr << "  --verify P Q:       verify QUBO correctness given known factors P and Q\n";
         return 1;
     }
 
     // Parse positional and optional args
-    std::string Narg, spinsFile, csrDir, metaDir;
+    std::string Narg, spinsFile, csrDir, metaDir, verifyP, verifyQ;
     for (int i = 1; i < argc; i++) {
         std::string a = argv[i];
         if (a == "--csr-dir" && i + 1 < argc) { csrDir = argv[++i]; continue; }
         if (a == "--meta-dir" && i + 1 < argc) { metaDir = argv[++i]; continue; }
         if (a == "--backtrack") { G_enableBacktracking = true; continue; }
+        if (a == "--verify" && i + 2 < argc) { verifyP = argv[++i]; verifyQ = argv[++i]; continue; }
         if (Narg.empty()) Narg = a;
         else if (spinsFile.empty()) spinsFile = a;
     }
@@ -1381,6 +1501,9 @@ int main(int argc, char* argv[]) {
     // Step 2: generate column clauses
     std::vector<Poly> clauses = generateColumnClauses(N, pv);
     std::cout << "Generated " << clauses.size() << " column clauses\n";
+
+    // Keep a copy of original clauses for verification
+    std::vector<Poly> originalClauses = clauses;
 
     // Step 3: simplify
     // Squaring cost budget = n_q^3.  This keeps total QUBO vars at O(n^3).
@@ -1484,6 +1607,13 @@ int main(int argc, char* argv[]) {
     } else {
         std::cout << "\n[QUBO has " << numVars << " variables. "
                   << "Re-run with spins file: " << argv[0] << " " << N << " spins_" << Nstr << "]\n";
+    }
+
+    // Verification mode
+    if (!verifyP.empty() && !verifyQ.empty()) {
+        uint128_t P = parseUint128(verifyP);
+        uint128_t Q = parseUint128(verifyQ);
+        verifyQUBO(P, Q, N, pv.n_p, pv.n_q, sr, originalClauses);
     }
 
     return 0;
