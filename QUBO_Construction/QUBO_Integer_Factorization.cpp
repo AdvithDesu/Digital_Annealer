@@ -302,6 +302,51 @@ std::string polyStr(const Poly& p) {
     return s;
 }
 
+// Canonical poly string for trace comparison with Python.
+// Format: "<const>[ +/- <coeff>*<vars_sorted_joined>]..."
+std::string polyStrCanonical(const Poly& p) {
+    std::vector<std::pair<std::vector<std::string>, int128_t>> terms;
+    int128_t constant = 0;
+    for (auto& [m, c] : p) {
+        if (m.empty()) { constant += c; continue; }
+        std::vector<std::string> names;
+        for (int v : m) names.push_back(G_vars.name(v));
+        std::sort(names.begin(), names.end());
+        terms.push_back({names, c});
+    }
+    std::sort(terms.begin(), terms.end());
+    std::string s = int128ToString(constant);
+    for (auto& [names, c] : terms) {
+        bool neg = c < 0;
+        s += neg ? " - " : " + ";
+        s += int128ToString(neg ? -c : c);
+        for (auto& n : names) s += "*" + n;
+    }
+    return s;
+}
+
+// Trace output (for diffing simplification path against Python).
+static bool G_trace = false;
+static std::ofstream G_traceFile;
+inline void traceVal(int iter, const std::string& rule, int ci,
+                     const std::string& var, int val) {
+    if (!G_trace) return;
+    std::string line = "TRACE iter=" + std::to_string(iter) +
+        " rule=" + rule + " clause=" + std::to_string(ci) +
+        " elim=" + var + " val=" + std::to_string(val);
+    if (G_traceFile.is_open()) G_traceFile << line << "\n";
+    else std::cout << line << "\n";
+}
+inline void traceExpr(int iter, const std::string& rule, int ci,
+                      const std::string& var, const Poly& expr) {
+    if (!G_trace) return;
+    std::string line = "TRACE iter=" + std::to_string(iter) +
+        " rule=" + rule + " clause=" + std::to_string(ci) +
+        " elim=" + var + " val=" + polyStrCanonical(expr);
+    if (G_traceFile.is_open()) G_traceFile << line << "\n";
+    else std::cout << line << "\n";
+}
+
 // ============================================================
 // Constraint types
 // ============================================================
@@ -596,50 +641,82 @@ std::unordered_map<int,Poly> applyRule3(const Poly& clause) {
     }
     if (!ok) return res;
 
-    // Pattern: t1 + t2 = 2*x3 => x3 = t1 (= t2, all equal for binary)
-    int v3 = terms[twoIdx].mon[0]; // the degree-1 variable with coeff +-2
-    int other1 = (twoIdx + 1) % 3;
-    int other2 = (twoIdx + 2) % 3;
-
-    auto hasS = [](const std::string& s){ return s.rfind("s_",0)==0; };
-    std::string n3 = G_vars.name(v3);
-
-    // Build the Poly expression for the substitution target
-    // Prefer to substitute s_ variables
-    // The coefficient-2 variable x3 = t1 (one of the other terms)
-    // Pick the simpler term (prefer degree-1 single vars over products)
-    auto buildTermPoly = [](const TermInfo& t) -> Poly {
-        Poly p;
-        p[t.mon] = 1; // the term itself (coeff is already ±1, we use abs value)
-        return p;
+    // Sort terms by canonical variable-name list to match Python's
+    // sympy match ordering (alphabetical on variable names).
+    auto monNames = [](const Monomial& m) {
+        std::vector<std::string> ns;
+        for (int v : m) ns.push_back(G_vars.name(v));
+        std::sort(ns.begin(), ns.end());
+        return ns;
     };
+    std::sort(terms.begin(), terms.end(), [&](const TermInfo& a, const TermInfo& b){
+        return monNames(a.mon) < monNames(b.mon);
+    });
 
-    // Prefer degree-1 target over product target for cleaner substitution
-    int preferIdx = other1;
-    if (terms[other1].mon.size() > 1 && terms[other2].mon.size() == 1) {
-        preferIdx = other2;
+    // Re-locate twoIdx after sort
+    twoIdx = -1;
+    for (int i = 0; i < 3; i++) {
+        if (abs128(terms[i].coeff) == 2 && terms[i].mon.size() == 1) {
+            twoIdx = i; break;
+        }
     }
 
-    if (hasS(n3)) {
-        // Substitute s_ variable with the preferred other term
-        res[v3] = buildTermPoly(terms[preferIdx]);
-    } else {
-        // The coefficient-2 term is not s_, check if either other term is a single s_ var
-        bool s1 = (terms[other1].mon.size() == 1 && hasS(G_vars.name(terms[other1].mon[0])));
-        bool s2 = (terms[other2].mon.size() == 1 && hasS(G_vars.name(terms[other2].mon[0])));
+    auto hasS = [](const std::string& s){ return s.rfind("s_",0)==0; };
+    auto buildTermPoly = [](const TermInfo& t) -> Poly {
+        Poly p;
+        p[t.mon] = 1;
+        return p;
+    };
+    auto isSingleVar = [](const TermInfo& t){ return t.mon.size() == 1; };
 
-        if (s1) {
-            // Substitute the s_ variable with the coefficient-2 variable
-            res[terms[other1].mon[0]] = polyVar(v3);
-        } else if (s2) {
-            res[terms[other2].mon[0]] = polyVar(v3);
-        } else if (terms[other1].mon.size() == 1 && terms[other2].mon.size() == 1) {
-            // All three are single variables, no s_ vars
-            // x1 = x2 = x3: substitute one with another
-            res[terms[other1].mon[0]] = polyVar(v3);
-        } else {
-            // Substitute the coefficient-2 var with the preferred term
-            res[v3] = buildTermPoly(terms[preferIdx]);
+    int v3 = terms[twoIdx].mon[0];
+    std::string n3 = G_vars.name(v3);
+
+    // Collect "other" terms in sorted order
+    std::vector<int> otherIdx;
+    for (int i = 0; i < 3; i++) if (i != twoIdx) otherIdx.push_back(i);
+    // After sorting, otherIdx is already in sorted order (skip twoIdx).
+
+    // Mirror Python's apply_rule_3 logic:
+    //   s_vars = [v for v in [v1,v2,v3] if 's_' in str(v)]
+    //   other_vars = the rest
+    // Here v1,v2,v3 correspond to our sorted terms (alphabetical).
+    std::vector<int> sIdx, otIdx;
+    auto isSVar = [&](const TermInfo& t){
+        return isSingleVar(t) && hasS(G_vars.name(t.mon[0]));
+    };
+    // Reconstruct [v1,v2,v3] order: in Python the +-2 term is x3, others are x1,x2
+    // Python's `for v in [v1, v2, v3]` order matters for which gets into s_vars/other_vars first.
+    // We approximate by walking sorted terms; this gives v1,v2 (others in sorted order), then v3.
+    std::vector<int> walkOrder = {otherIdx[0], otherIdx[1], twoIdx};
+    for (int i : walkOrder) {
+        if (isSVar(terms[i])) sIdx.push_back(i);
+        else otIdx.push_back(i);
+    }
+
+    if (!sIdx.empty()) {
+        // sub_target = otIdx[0] if otIdx else sIdx[0]
+        int targetIdx = !otIdx.empty() ? otIdx[0] : sIdx[0];
+        Poly targetPoly = isSingleVar(terms[targetIdx]) ? polyVar(terms[targetIdx].mon[0])
+                                                        : buildTermPoly(terms[targetIdx]);
+        for (int si : sIdx) {
+            if (si == targetIdx) continue;
+            // s var must be single var here (we enforced isSingleVar in isSVar)
+            res[terms[si].mon[0]] = targetPoly;
+        }
+        if (otIdx.size() > 1 && isSingleVar(terms[otIdx[1]])) {
+            res[terms[otIdx[1]].mon[0]] = targetPoly;
+        }
+    } else {
+        // No s_ variables: x1 = x2 = x3 -> set v1=v2 and v3=v2 (using Python's pattern)
+        // Python: new_constraints[v1]=v2; new_constraints[v3]=v2
+        // walkOrder = [v1, v2, v3] in our reconstructed order.
+        int iv1 = walkOrder[0], iv2 = walkOrder[1], iv3 = walkOrder[2];
+        if (isSingleVar(terms[iv1]) && isSingleVar(terms[iv2])) {
+            res[terms[iv1].mon[0]] = polyVar(terms[iv2].mon[0]);
+        }
+        if (isSingleVar(terms[iv3]) && isSingleVar(terms[iv2])) {
+            res[terms[iv3].mon[0]] = polyVar(terms[iv2].mon[0]);
         }
     }
     return res;
@@ -748,6 +825,11 @@ std::unordered_map<int,Poly> applyParityRule(const Poly& clause) {
         if (m.size() == 1 && (abs128(c) % 2 != 0))
             oddTerms.push_back({m[0], ((c % 2) + 2) % 2});  // reduce to +1
     }
+    // Sort by variable name to match Python sympy's canonical match ordering
+    std::sort(oddTerms.begin(), oddTerms.end(),
+        [](const std::pair<int,int128_t>& a, const std::pair<int,int128_t>& b){
+            return G_vars.name(a.first) < G_vars.name(b.first);
+        });
     int128_t oddConst = getConst(clause) % 2;
     if (oddConst < 0) oddConst += 2;
 
@@ -821,6 +903,17 @@ struct SimplifierResult {
     // mul constraints (simplified: just expression constraints for now)
 };
 
+// Helper: sort an unordered_map<int,T>'s entries by canonical variable name
+// so that downstream iteration order matches Python sympy's alphabetical order.
+template <typename T>
+std::vector<std::pair<int,T>> sortByName(const std::unordered_map<int,T>& m) {
+    std::vector<std::pair<int,T>> v(m.begin(), m.end());
+    std::sort(v.begin(), v.end(), [](const std::pair<int,T>& a, const std::pair<int,T>& b){
+        return G_vars.name(a.first) < G_vars.name(b.first);
+    });
+    return v;
+}
+
 SimplifierResult clauseSimplifier(std::vector<Poly> clauses) {
     SimplifierResult result;
     result.clauses = std::move(clauses);
@@ -851,11 +944,13 @@ SimplifierResult clauseSimplifier(std::vector<Poly> clauses) {
         }
 
         // --- Rule 1 & 2 ---
-        for (auto& clause : result.clauses) {
+        for (int ci = 0; ci < (int)result.clauses.size(); ci++) {
+            auto& clause = result.clauses[ci];
             auto cons = applyRule12(clause);
             if (!cons.empty()) {
-                for (auto& [v, val] : cons) {
+                for (auto& [v, val] : sortByName(cons)) {
                     std::string nm = G_vars.name(v);
+                    traceVal(iter, "rule_1_2", ci, nm, val);
                     result.assignmentConstraints.push_back({nm, val});
                     applyValueSub(result.clauses, v, val);
                 }
@@ -865,11 +960,13 @@ SimplifierResult clauseSimplifier(std::vector<Poly> clauses) {
         }
 
         // --- Rule 4 ---
-        for (auto& clause : result.clauses) {
+        for (int ci = 0; ci < (int)result.clauses.size(); ci++) {
+            auto& clause = result.clauses[ci];
             auto cons = applyRule4(clause);
             if (!cons.empty()) {
-                for (auto& [v, val] : cons) {
+                for (auto& [v, val] : sortByName(cons)) {
                     std::string nm = G_vars.name(v);
+                    traceVal(iter, "rule_4", ci, nm, val);
                     result.assignmentConstraints.push_back({nm, val});
                     applyValueSub(result.clauses, v, val);
                 }
@@ -879,12 +976,13 @@ SimplifierResult clauseSimplifier(std::vector<Poly> clauses) {
         }
 
         // --- Rule 3 ---
-        for (auto& clause : result.clauses) {
+        for (int ci = 0; ci < (int)result.clauses.size(); ci++) {
+            auto& clause = result.clauses[ci];
             auto cons = applyRule3(clause);
             if (!cons.empty()) {
-                for (auto& [v, expr] : cons) {
+                for (auto& [v, expr] : sortByName(cons)) {
                     std::string nm = G_vars.name(v);
-                    // check if p or q
+                    traceExpr(iter, "rule_3", ci, nm, expr);
                     if (nm[0] == 'p' || nm[0] == 'q')
                         result.expressionConstraints.push_back({nm, expr});
                     applyExprSub(result.clauses, v, expr);
@@ -895,11 +993,13 @@ SimplifierResult clauseSimplifier(std::vector<Poly> clauses) {
         }
 
         // --- Rule 6 ---
-        for (auto& clause : result.clauses) {
+        for (int ci = 0; ci < (int)result.clauses.size(); ci++) {
+            auto& clause = result.clauses[ci];
             auto cons = applyRule6(clause);
             if (!cons.empty()) {
-                for (auto& [v, expr] : cons) {
+                for (auto& [v, expr] : sortByName(cons)) {
                     std::string nm = G_vars.name(v);
+                    traceExpr(iter, "rule_6", ci, nm, expr);
                     if (nm[0] == 'p' || nm[0] == 'q')
                         result.expressionConstraints.push_back({nm, expr});
                     applyExprSub(result.clauses, v, expr);
@@ -910,11 +1010,13 @@ SimplifierResult clauseSimplifier(std::vector<Poly> clauses) {
         }
 
         // --- Parity rule ---
-        for (auto& clause : result.clauses) {
+        for (int ci = 0; ci < (int)result.clauses.size(); ci++) {
+            auto& clause = result.clauses[ci];
             auto cons = applyParityRule(clause);
             if (!cons.empty()) {
-                for (auto& [v, expr] : cons) {
+                for (auto& [v, expr] : sortByName(cons)) {
                     std::string nm = G_vars.name(v);
+                    traceExpr(iter, "parity", ci, nm, expr);
                     if (nm[0] == 'p' || nm[0] == 'q')
                         result.expressionConstraints.push_back({nm, expr});
                     applyExprSub(result.clauses, v, expr);
@@ -937,8 +1039,9 @@ SimplifierResult clauseSimplifier(std::vector<Poly> clauses) {
 
             auto cons = applyReplacement(result.clauses);
             if (!cons.empty()) {
-                for (auto& [v, expr] : cons) {
+                for (auto& [v, expr] : sortByName(cons)) {
                     std::string nm = G_vars.name(v);
+                    traceExpr(iter, "replacement", -1, nm, expr);
                     if (nm[0] == 'p' || nm[0] == 'q')
                         result.expressionConstraints.push_back({nm, expr});
                     applyExprSub(result.clauses, v, expr);
@@ -1153,7 +1256,7 @@ IsingCSR quboToIsingCSR(const QUBODict& Q, int numVars) {
             ising.h[i] += 0.5 * val;
             ising.offset += 0.5 * val;
         } else {
-            double Jij = val / 4.0;
+            double Jij = val / 2.0;
             adj[i].push_back({j, Jij});
             ising.h[i] += 0.5 * val;
             ising.offset += 0.25 * val;
@@ -1473,15 +1576,20 @@ int main(int argc, char* argv[]) {
     }
 
     // Parse positional and optional args
-    std::string Narg, spinsFile, csrDir, metaDir, verifyP, verifyQ;
+    std::string Narg, spinsFile, csrDir, metaDir, verifyP, verifyQ, traceFile;
     for (int i = 1; i < argc; i++) {
         std::string a = argv[i];
         if (a == "--csr-dir" && i + 1 < argc) { csrDir = argv[++i]; continue; }
         if (a == "--meta-dir" && i + 1 < argc) { metaDir = argv[++i]; continue; }
         if (a == "--backtrack") { G_enableBacktracking = true; continue; }
         if (a == "--verify" && i + 2 < argc) { verifyP = argv[++i]; verifyQ = argv[++i]; continue; }
+        if (a == "--trace" && i + 1 < argc) { traceFile = argv[++i]; G_trace = true; continue; }
         if (Narg.empty()) Narg = a;
         else if (spinsFile.empty()) spinsFile = a;
+    }
+    if (G_trace && !traceFile.empty()) {
+        G_traceFile.open(traceFile);
+        if (!G_traceFile) { std::cerr << "Cannot open trace file: " << traceFile << "\n"; return 1; }
     }
     if (Narg.empty()) {
         std::cerr << "ERROR: <N> argument is required.\n";
