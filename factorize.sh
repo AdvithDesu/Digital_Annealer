@@ -82,7 +82,7 @@ done
 
 # ── Compute N from P and Q if provided ───────────────────────
 if [[ -n "$INPUT_P" && -n "$INPUT_Q" ]]; then
-    N=$(python -c "print($INPUT_P * $INPUT_Q)")
+    N=$(python3 -c "print($INPUT_P * $INPUT_Q)")
     echo "P=$INPUT_P, Q=$INPUT_Q => N=$N"
 elif [[ -n "$INPUT_P" || -n "$INPUT_Q" ]]; then
     echo "ERROR: both -p and -q must be specified together" >&2
