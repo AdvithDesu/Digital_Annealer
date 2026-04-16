@@ -182,7 +182,7 @@ echo
 echo "===== Step 3: Post-processing ====="
 echo
 
-"$QUBO_BIN" "$N" "$SPINS_FILE" --csr-dir "$CSR_DIR/" --meta-dir "$META_DIR/" --post-process-only
+"$QUBO_BIN" "$N" "$SPINS_FILE" --csr-dir "$CSR_DIR/" --meta-dir "$META_DIR/" $BACKTRACK_FLAG
 
 echo
 echo "===== Pipeline complete ====="

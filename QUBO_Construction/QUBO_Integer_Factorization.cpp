@@ -1324,99 +1324,6 @@ void saveExpressionConstraints(const std::string& filename,
 }
 
 // ============================================================
-// Load metadata files for post-process-only mode
-// ============================================================
-std::vector<std::pair<std::string,int>> loadAssignmentConstraints(const std::string& filename) {
-    std::vector<std::pair<std::string,int>> result;
-    std::ifstream f(filename);
-    if (!f.is_open()) throw std::runtime_error("Cannot open: " + filename);
-    std::string line;
-    while (std::getline(f, line)) {
-        // format: "name = value"
-        auto eq = line.find(" = ");
-        if (eq == std::string::npos) continue;
-        std::string nm = line.substr(0, eq);
-        int val = std::stoi(line.substr(eq + 3));
-        result.push_back({nm, val});
-    }
-    return result;
-}
-
-// Parse a poly string like "1*p_2*q_1" or "1 + -1*p_2" back into Poly.
-// Terms are separated by " + ". Each term is coeff*var1*var2*...
-// A bare number (no *) is a constant term.
-Poly parsePoly(const std::string& s) {
-    Poly p;
-    // Split on " + " (note: negative terms appear as " + -1*...")
-    std::string remaining = s;
-    while (!remaining.empty()) {
-        std::string token;
-        auto sep = remaining.find(" + ");
-        if (sep != std::string::npos) {
-            token = remaining.substr(0, sep);
-            remaining = remaining.substr(sep + 3);
-        } else {
-            // Also handle " - " as separator
-            auto msep = remaining.find(" - ");
-            if (msep != std::string::npos) {
-                token = remaining.substr(0, msep);
-                remaining = "-" + remaining.substr(msep + 3);
-            } else {
-                token = remaining;
-                remaining.clear();
-            }
-        }
-        if (token.empty()) continue;
-        // Split token on '*' to get coeff and vars
-        std::vector<std::string> parts;
-        std::istringstream ts(token);
-        std::string part;
-        while (std::getline(ts, part, '*')) parts.push_back(part);
-        if (parts.empty()) continue;
-        int128_t coeff = (int128_t)std::stoll(parts[0]);
-        Monomial m;
-        for (size_t i = 1; i < parts.size(); i++) {
-            auto it = G_vars.nameToIdx.find(parts[i]);
-            if (it != G_vars.nameToIdx.end())
-                m.insert(it->second);
-        }
-        p[m] += coeff;
-    }
-    return p;
-}
-
-std::vector<std::pair<std::string,Poly>> loadExpressionConstraints(const std::string& filename) {
-    std::vector<std::pair<std::string,Poly>> result;
-    std::ifstream f(filename);
-    if (!f.is_open()) throw std::runtime_error("Cannot open: " + filename);
-    std::string line;
-    while (std::getline(f, line)) {
-        auto eq = line.find(" = ");
-        if (eq == std::string::npos) continue;
-        std::string nm = line.substr(0, eq);
-        std::string expr = line.substr(eq + 3);
-        result.push_back({nm, parsePoly(expr)});
-    }
-    return result;
-}
-
-std::vector<std::string> loadIndexToVar(const std::string& filename) {
-    std::vector<std::string> names;
-    std::ifstream f(filename);
-    if (!f.is_open()) throw std::runtime_error("Cannot open: " + filename);
-    std::string line;
-    while (std::getline(f, line)) {
-        // format: "0 varname (global_idx=5)"
-        std::istringstream iss(line);
-        int idx;
-        std::string name;
-        if (iss >> idx >> name)
-            names.push_back(name);
-    }
-    return names;
-}
-
-// ============================================================
 // Post-processing: given a QUBO solution vector (0/1 per variable),
 // reconstruct the factors P and Q using stored constraints.
 // ============================================================
@@ -1664,20 +1571,17 @@ int main(int argc, char* argv[]) {
         std::cerr << "  --csr-dir DIR:      directory for CSR output files (default: cwd)\n";
         std::cerr << "  --meta-dir DIR:     directory for metadata files (default: cwd)\n";
         std::cerr << "  --backtrack:        enable replacement backtracking (smaller QUBO, harder for SA)\n";
-        std::cerr << "  --post-process-only: skip QUBO construction, load metadata from disk\n";
         std::cerr << "  --verify P Q:       verify QUBO correctness given known factors P and Q\n";
         return 1;
     }
 
     // Parse positional and optional args
     std::string Narg, spinsFile, csrDir, metaDir, verifyP, verifyQ, traceFile;
-    bool postProcessOnly = false;
     for (int i = 1; i < argc; i++) {
         std::string a = argv[i];
         if (a == "--csr-dir" && i + 1 < argc) { csrDir = argv[++i]; continue; }
         if (a == "--meta-dir" && i + 1 < argc) { metaDir = argv[++i]; continue; }
         if (a == "--backtrack") { G_enableBacktracking = true; continue; }
-        if (a == "--post-process-only") { postProcessOnly = true; continue; }
         if (a == "--verify" && i + 2 < argc) { verifyP = argv[++i]; verifyQ = argv[++i]; continue; }
         if (a == "--trace" && i + 1 < argc) { traceFile = argv[++i]; G_trace = true; continue; }
         if (Narg.empty()) Narg = a;
@@ -1699,33 +1603,8 @@ int main(int argc, char* argv[]) {
 
     auto t0 = std::chrono::high_resolution_clock::now();
 
-    // Step 1: initialize variables (also populates G_vars for name lookups)
+    // Step 1: initialize variables
     ProblemVars pv = initializeVariables(N);
-
-    // Post-process-only mode: skip QUBO construction, load metadata from disk
-    if (postProcessOnly) {
-        if (spinsFile.empty()) {
-            std::cerr << "ERROR: --post-process-only requires a spins file.\n";
-            return 1;
-        }
-        std::string Nstr = uint128ToString(N);
-        auto assignConstraints = loadAssignmentConstraints(metaDir + "assignment_constraints_" + Nstr + ".txt");
-        auto exprConstraints   = loadExpressionConstraints(metaDir + "expression_constraints_" + Nstr + ".txt");
-        auto activeVarNames    = loadIndexToVar(metaDir + "index_to_var_" + Nstr + ".txt");
-
-        SimplifierResult sr;
-        sr.assignmentConstraints = std::move(assignConstraints);
-        sr.expressionConstraints = std::move(exprConstraints);
-
-        std::vector<int> quboSol = readSpinsFile(spinsFile);
-        if (!activeVarNames.empty() && (int)quboSol.size() != (int)activeVarNames.size()) {
-            std::cerr << "ERROR: spins file has " << quboSol.size()
-                      << " values but metadata has " << activeVarNames.size() << " variables.\n";
-            return 1;
-        }
-        postProcess(quboSol, N, pv.n_p, pv.n_q, sr, activeVarNames);
-        return 0;
-    }
 
     // Step 2: generate column clauses
     std::vector<Poly> clauses = generateColumnClauses(N, pv);
@@ -1799,26 +1678,29 @@ int main(int argc, char* argv[]) {
     double elapsed = std::chrono::duration<double>(t1 - t0).count();
     std::cout << "Total construction time: " << elapsed << " seconds\n";
 
-    // Step 6: save outputs
     std::string Nstr = uint128ToString(N);
-    saveCSV(csrDir + "row_ptr_" + Nstr + ".csv",    ising.row_ptr);
-    saveCSV(csrDir + "col_idx_" + Nstr + ".csv",    ising.col_idx);
-    saveCSV(csrDir + "J_values_" + Nstr + ".csv",   ising.values);
-    saveHVector(csrDir + "h_vector_" + Nstr + ".csv", ising.h);
-    saveIndexToVar(metaDir + "index_to_var_" + Nstr + ".txt", activeVarNames, activeIdx);
-    saveAssignmentConstraints(metaDir + "assignment_constraints_" + Nstr + ".txt", sr.assignmentConstraints);
-    saveExpressionConstraints(metaDir + "expression_constraints_" + Nstr + ".txt", sr.expressionConstraints);
 
-    // Print QUBO dict summary (first 20 entries)
-    std::cout << "\nQUBO dict (first 20 non-zero entries):\n";
-    int cnt = 0;
-    for (auto& [key, val] : Qremapped) {
-        if (cnt++ >= 20) break;
-        std::cout << "  (" << key.first << "," << key.second << ") -> " << val
-                  << "  [" << activeVarNames[key.first] << " x " << activeVarNames[key.second] << "]\n";
+    // Step 6: save outputs (skip if we're just post-processing)
+    if (spinsFile.empty()) {
+        saveCSV(csrDir + "row_ptr_" + Nstr + ".csv",    ising.row_ptr);
+        saveCSV(csrDir + "col_idx_" + Nstr + ".csv",    ising.col_idx);
+        saveCSV(csrDir + "J_values_" + Nstr + ".csv",   ising.values);
+        saveHVector(csrDir + "h_vector_" + Nstr + ".csv", ising.h);
+        saveIndexToVar(metaDir + "index_to_var_" + Nstr + ".txt", activeVarNames, activeIdx);
+        saveAssignmentConstraints(metaDir + "assignment_constraints_" + Nstr + ".txt", sr.assignmentConstraints);
+        saveExpressionConstraints(metaDir + "expression_constraints_" + Nstr + ".txt", sr.expressionConstraints);
+
+        // Print QUBO dict summary (first 20 entries)
+        std::cout << "\nQUBO dict (first 20 non-zero entries):\n";
+        int cnt = 0;
+        for (auto& [key, val] : Qremapped) {
+            if (cnt++ >= 20) break;
+            std::cout << "  (" << key.first << "," << key.second << ") -> " << val
+                      << "  [" << activeVarNames[key.first] << " x " << activeVarNames[key.second] << "]\n";
+        }
+
+        std::cout << "\nDone. Output files written with prefix *_" << Nstr << ".*\n";
     }
-
-    std::cout << "\nDone. Output files written with prefix *_" << Nstr << ".*\n";
 
     // Post-processing
     if (numVars == 0) {
