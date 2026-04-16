@@ -6,9 +6,11 @@
 #
 # Usage:
 #   ./factorize.sh <N> [options]
+#   ./factorize.sh -p <P> -q <Q> [options]
 #
-# Required:
+# Required (one of):
 #   <N>                    integer to factorize (product of two primes)
+#   -p <P> -q <Q>         two primes; N is computed as P*Q (supports 128-bit)
 #
 # SA options:
 #   -x, --start-temp <T>   starting temperature       (default: 100.0)
@@ -17,6 +19,9 @@
 #   -m, --sweeps     <M>   sweeps per beta            (default: 10)
 #   -s, --seed       <S>   RNG seed                   (default: auto)
 #   -d, --debug            enable debug output
+#
+# QUBO options:
+#   -b, --backtrack        enable replacement backtracking (smaller QUBO)
 
 set -euo pipefail
 
@@ -36,21 +41,29 @@ ALPHA=0.95
 SWEEPS=10
 SEED=""
 DEBUG_FLAG=""
+BACKTRACK_FLAG=""
+INPUT_P=""
+INPUT_Q=""
 
 # ── Parse arguments ──────────────────────────────────────────
 if [[ $# -lt 1 ]]; then
     echo "Usage: $0 <N> [options]" >&2
+    echo "   or: $0 -p <P> -q <Q> [options]" >&2
     echo "Run '$0 --help' for details." >&2
     exit 1
 fi
 
 if [[ "$1" == "-h" || "$1" == "--help" ]]; then
-    sed -n '2,18p' "$0"
+    sed -n '2,24p' "$0"
     exit 0
 fi
 
-N="$1"
-shift
+# First positional arg is N, unless it starts with '-'
+N=""
+if [[ "$1" != -* ]]; then
+    N="$1"
+    shift
+fi
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -60,14 +73,32 @@ while [[ $# -gt 0 ]]; do
         -m|--sweeps)       SWEEPS="$2";       shift 2 ;;
         -s|--seed)         SEED="$2";         shift 2 ;;
         -d|--debug)        DEBUG_FLAG="-d";   shift ;;
+        -b|--backtrack)    BACKTRACK_FLAG="--backtrack"; shift ;;
+        -p)                INPUT_P="$2";      shift 2 ;;
+        -q)                INPUT_Q="$2";      shift 2 ;;
         *) echo "Unknown option: $1" >&2; exit 1 ;;
     esac
 done
 
+# ── Compute N from P and Q if provided ───────────────────────
+if [[ -n "$INPUT_P" && -n "$INPUT_Q" ]]; then
+    N=$(python -c "print($INPUT_P * $INPUT_Q)")
+    echo "P=$INPUT_P, Q=$INPUT_Q => N=$N"
+elif [[ -n "$INPUT_P" || -n "$INPUT_Q" ]]; then
+    echo "ERROR: both -p and -q must be specified together" >&2
+    exit 1
+fi
+
+if [[ -z "$N" ]]; then
+    echo "ERROR: no N specified. Provide <N> or use -p <P> -q <Q>" >&2
+    exit 1
+fi
+
 # ── Build binaries if needed ─────────────────────────────────
-if [[ ! -x "$QUBO_BIN" ]]; then
+QUBO_SRC="QUBO_Construction/QUBO_Integer_Factorization.cpp"
+if [[ ! -x "$QUBO_BIN" || "$QUBO_SRC" -nt "$QUBO_BIN" ]]; then
     echo "Building QUBO construction binary..."
-    g++ -O2 -std=c++17 -o "$QUBO_BIN" QUBO_Construction/QUBO_Integer_Factorization.cpp
+    g++ -O2 -std=c++17 -o "$QUBO_BIN" "$QUBO_SRC"
     echo "Built: $QUBO_BIN"
 fi
 
@@ -94,7 +125,7 @@ mkdir -p "$RESULTS_DIR"
 echo "===== Step 1: QUBO Construction (N=$N) ====="
 echo
 
-"$QUBO_BIN" "$N" --csr-dir "$CSR_DIR/" --meta-dir "$META_DIR/"
+"$QUBO_BIN" "$N" --csr-dir "$CSR_DIR/" --meta-dir "$META_DIR/" $BACKTRACK_FLAG
 
 # Verify CSR files were created
 for f in "$CSR_DIR/row_ptr_${N}.csv" \
@@ -151,7 +182,7 @@ echo
 echo "===== Step 3: Post-processing ====="
 echo
 
-"$QUBO_BIN" "$N" "$SPINS_FILE" --csr-dir "$CSR_DIR/" --meta-dir "$META_DIR/"
+"$QUBO_BIN" "$N" "$SPINS_FILE" --csr-dir "$CSR_DIR/" --meta-dir "$META_DIR/" $BACKTRACK_FLAG
 
 echo
 echo "===== Pipeline complete ====="
