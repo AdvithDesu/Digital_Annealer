@@ -144,7 +144,7 @@ static std::vector<int> buildGreedyColoring(
     }
     if (bad_edges) {
         fprintf(stderr,
-                "FATAL: coloring broken — %d edges connect same-color spins\n",
+                "FATAL: coloring broken, %d edges connect same-color spins\n",
                 bad_edges);
         std::exit(1);
     }
@@ -265,7 +265,7 @@ __global__ void collectFlipCandidates_dense(
         const double*        gpuLinTermsVect,
         const float* __restrict__ randvals,
         signed char*         gpuLatSpin,
-        const float          beta,
+        const double         beta,
         FlipCandidate*       candidates,
         int*                 num_candidates,
         const int*           dense_spin_ids   // maps blockIdx.x → global spin id (for this color)
@@ -282,7 +282,7 @@ __global__ void collectFlipCandidates_sparse(
         signed char*         gpuLatSpin,
         const signed char*   d_hub_vals,
         int                  num_hubs,
-        const float          beta,
+        const double         beta,
         FlipCandidate*       candidates,
         int*                 num_candidates,
         const int*           color_sparse_csr_ids,   // sparse-CSR indices for this color
@@ -359,9 +359,9 @@ int main(int argc, char* argv[])
 	
 	std::string linear_file = "";
 	
-	float start_temp = 20.f;
-	float stop_temp = 0.001f;
-	float alpha = 0.95f;
+	double start_temp = 20.0;
+	double stop_temp = 0.001;
+	double alpha = 0.95;
 	unsigned long long seed = ((getpid()* rand()) & 0x7FFFFFFFF); // ((GetCurrentProcessId()* rand()) & 0x7FFFFFFFF);
 	
 	unsigned int num_temps = 1000; //atoi(argv[2]);
@@ -817,7 +817,7 @@ int main(int argc, char* argv[])
 		                gpuLinTermsVect,
 		                gpu_randvals,
 		                gpu_spins_old,
-		                (float)beta_schedule[i],
+		                beta_schedule[i],
 		                gpu_candidates,
 		                gpu_num_candidates,
 		                gpu_color_dense_flat + dense_begin
@@ -836,7 +836,7 @@ int main(int argc, char* argv[])
 		                gpu_spins_old,
 		                gpu_hub_vals,
 		                h_num_hub,
-		                (float)beta_schedule[i],
+		                beta_schedule[i],
 		                gpu_candidates,
 		                gpu_num_candidates,
 		                gpu_color_sparse_flat + sparse_begin,
@@ -990,7 +990,7 @@ __global__ void collectFlipCandidates_dense(
         const double*  gpuLinTermsVect,
         const float* __restrict__ randvals,
         signed char*   gpuLatSpin,
-        const float    beta,
+        const double   beta,
         FlipCandidate* candidates,
         int*           num_candidates,
         const int*     dense_spin_ids   // maps blockIdx.x → global spin id
@@ -1020,7 +1020,7 @@ __global__ void collectFlipCandidates_dense(
     if (p_Id == 0) {
         double dE = -2.0 * (double)current_spin
                     * (sh_mem[0] + gpuLinTermsVect[vertice_Id]);
-        float acceptance = fminf(1.0f, expf(-beta * (float)dE));
+        float acceptance = fminf(1.0f, (float)exp(-beta * dE));
 
         if (randvals[vertice_Id] < acceptance) {
             int idx = atomicAdd(num_candidates, 1);
@@ -1049,7 +1049,7 @@ __global__ void collectFlipCandidates_sparse(
         signed char*        gpuLatSpin,
         const signed char*  d_hub_vals,
         int                 num_hubs,
-        const float         beta,
+        const double        beta,
         FlipCandidate*      candidates,
         int*                num_candidates,
         const int*          color_sparse_csr_ids,
@@ -1102,7 +1102,7 @@ __global__ void collectFlipCandidates_sparse(
     if (lane == 0) {
         double dE = -2.0 * (double)current_spin
                     * (local_sum + gpuLinTermsVect[vertice_Id]);
-        float acceptance = fminf(1.0f, expf(-beta * (float)dE));
+        float acceptance = fminf(1.0f, (float)exp(-beta * dE));
         if (randvals[vertice_Id] < acceptance) {
             int idx = atomicAdd(num_candidates, 1);
             candidates[idx].spin_id      = vertice_Id;
