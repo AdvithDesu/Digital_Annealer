@@ -115,6 +115,7 @@ double approxLog2_128(uint128_t n) {
 // Global flags
 // ============================================================
 static bool G_enableBacktracking = false;  // disabled by default
+static bool G_normalizeClauses = false;     // per-clause max-abs normalization, opt-in with --normalize
 
 // ============================================================
 // Variable registry  (string name <-> int index)
@@ -1098,104 +1099,148 @@ int newAuxVar(const std::string& prefix) {
 //   Positive 4th degree: needs 2 auxiliary vars (recursive application)
 //   Negative 4th degree: -|a|*x1*x2*x3*x4 = min_w -|a|*w*(x1+x2+x3+x4-3)
 QUBODict buildQUBO(const std::vector<Poly>& clauses, double& offset) {
-    // First, collect all monomials from H = sum clause^2
-    Poly H;
+    // H = sum_k (clause_k / s_k)^2, accumulated as double.
+    // s_k = max |coefficient| in clause_k (or 1 if normalization disabled).
+    // Rationale: without scaling, squaring produces max term ~ s_k^2 and the
+    // simplifier's cascading replacement makes s_k grow ~2^k with column index.
+    // Dividing by s_k flattens the per-clause energy contribution to O(1),
+    // collapsing ~16 orders of magnitude of dynamic range in |J| / |h|.
+    using PolyD = std::unordered_map<Monomial, double, MonomialHash>;
+    PolyD H_d;
+
+    double minScale = 0.0, maxScale = 0.0;
+    bool firstScale = true;
+
     for (auto& clause : clauses) {
         if (isZero(clause)) continue;
+
+        // Per-clause scale factor
+        double inv_s2 = 1.0;
+        if (G_normalizeClauses) {
+            int128_t maxAbs = 0;
+            for (auto& [m, c] : clause) {
+                int128_t a = (c < 0) ? -c : c;
+                if (a > maxAbs) maxAbs = a;
+            }
+            if (maxAbs > 0) {
+                double s = (double)maxAbs;
+                inv_s2 = 1.0 / (s * s);
+                if (firstScale) { minScale = maxScale = s; firstScale = false; }
+                else { if (s < minScale) minScale = s; if (s > maxScale) maxScale = s; }
+            }
+        }
+
+        // Exact squaring in int128, then convert + scale into double H
         Poly sq = polyMul(clause, clause);
-        for (auto& [m, c] : sq) addTerm(H, m, c);
+        for (auto& [m, c] : sq) {
+            H_d[m] += (double)c * inv_s2;
+        }
     }
 
-    // Collect degree-3 and degree-4 terms, group by unique variable sets
-    // (like the Python quadrizate function)
-    std::map<Monomial, int128_t> cubicTerms;   // 3-variable monomials
-    std::map<Monomial, int128_t> quarticTerms; // 4-variable monomials
-    Poly quadraticH; // degree <= 2 terms kept as-is
+    if (G_normalizeClauses && !firstScale) {
+        std::cout << "Per-clause scale (max|c|): min=" << minScale
+                  << "  max=" << maxScale
+                  << "  dynamic range=" << (maxScale / minScale) << "\n";
+    }
 
-    for (auto& [m, c] : H) {
+    // Drop exact zeros from floating accumulation
+    for (auto it = H_d.begin(); it != H_d.end(); ) {
+        if (it->second == 0.0) it = H_d.erase(it);
+        else ++it;
+    }
+
+    // Split into degree groups
+    std::map<Monomial, double> cubicTerms;
+    std::map<Monomial, double> quarticTerms;
+    PolyD quadraticH;
+
+    for (auto& [m, c] : H_d) {
         if (m.size() <= 2) {
-            addTerm(quadraticH, m, c);
+            quadraticH[m] += c;
         } else if (m.size() == 3) {
             cubicTerms[m] += c;
         } else if (m.size() == 4) {
             quarticTerms[m] += c;
         }
-        // degree > 4 shouldn't occur from squaring degree-2 clauses
     }
 
     // Diagnostic: count terms by degree
     int deg2count = (int)quadraticH.size();
     int deg3count = 0, deg4count = 0;
-    for (auto& [m, c] : cubicTerms) if (c != 0) deg3count++;
-    for (auto& [m, c] : quarticTerms) if (c != 0) deg4count++;
+    for (auto& [m, c] : cubicTerms) if (c != 0.0) deg3count++;
+    for (auto& [m, c] : quarticTerms) if (c != 0.0) deg4count++;
     std::cout << "H terms by degree: deg<=2=" << deg2count
               << ", deg3=" << deg3count << ", deg4=" << deg4count << "\n";
 
+    // Local addTerm for double coefficients
+    auto addD = [](PolyD& p, const Monomial& m, double c) {
+        if (c == 0.0) return;
+        p[m] += c;
+        if (p[m] == 0.0) p.erase(m);
+    };
+
     // Apply exact quadratization for cubic terms
     for (auto& [m, coeff] : cubicTerms) {
-        if (coeff == 0) continue;
+        if (coeff == 0.0) continue;
         int a = m[0], b = m[1], c_var = m[2];
         std::string wname = "w_" + std::to_string(g_auxCounter++);
         int w = G_vars.get(wname);
 
-        if (coeff > 0) {
+        if (coeff > 0.0) {
             // Positive: a*x1*x2*x3 = min_w a*(w*x3 + x1*x2 - x1*w - x2*w + w)
-            addTerm(quadraticH, {w, c_var},  coeff);   // w*x3
-            addTerm(quadraticH, {a, b},      coeff);   // x1*x2
-            addTerm(quadraticH, {a, w},     -coeff);   // -x1*w
-            addTerm(quadraticH, {b, w},     -coeff);   // -x2*w
-            addTerm(quadraticH, {w},         coeff);   // w
+            addD(quadraticH, {w, c_var},  coeff);
+            addD(quadraticH, {a, b},      coeff);
+            addD(quadraticH, {a, w},     -coeff);
+            addD(quadraticH, {b, w},     -coeff);
+            addD(quadraticH, {w},         coeff);
         } else {
             // Negative: coeff*x1*x2*x3 = min_w |coeff|*(-w*(x1+x2+x3-2))
-            //         = min_w |coeff|*(-w*x1 - w*x2 - w*x3 + 2*w)
-            int128_t absC = -coeff;
-            addTerm(quadraticH, {w, a},     -absC);    // -w*x1
-            addTerm(quadraticH, {w, b},     -absC);    // -w*x2
-            addTerm(quadraticH, {w, c_var}, -absC);    // -w*x3
-            addTerm(quadraticH, {w},         2*absC);  // 2*w
+            double absC = -coeff;
+            addD(quadraticH, {w, a},     -absC);
+            addD(quadraticH, {w, b},     -absC);
+            addD(quadraticH, {w, c_var}, -absC);
+            addD(quadraticH, {w},         2.0 * absC);
         }
     }
 
     // Apply exact quadratization for quartic terms
     for (auto& [m, coeff] : quarticTerms) {
-        if (coeff == 0) continue;
+        if (coeff == 0.0) continue;
         int a = m[0], b = m[1], c_var = m[2], d = m[3];
 
-        if (coeff > 0) {
-            // Positive 4th degree: use 2 aux vars (recursive from paper sec 4.2)
-            // x1*x2*x3*x4 = min_{w,z} (z*x4 + w*x3 - z*w - z*x3 + z + x1*x2 - w*x1 - w*x2 + w)
+        if (coeff > 0.0) {
+            // Positive 4th degree: 2 aux vars
             std::string wname = "w_" + std::to_string(g_auxCounter++);
             std::string zname = "w_" + std::to_string(g_auxCounter++);
             int w = G_vars.get(wname);
             int z = G_vars.get(zname);
 
-            addTerm(quadraticH, {z, d},      coeff);   // z*x4
-            addTerm(quadraticH, {w, c_var},  coeff);   // w*x3
-            addTerm(quadraticH, {z, w},     -coeff);   // -z*w
-            addTerm(quadraticH, {z, c_var}, -coeff);   // -z*x3
-            addTerm(quadraticH, {z},         coeff);   // z
-            addTerm(quadraticH, {a, b},      coeff);   // x1*x2
-            addTerm(quadraticH, {w, a},     -coeff);   // -w*x1
-            addTerm(quadraticH, {w, b},     -coeff);   // -w*x2
-            addTerm(quadraticH, {w},         coeff);   // w
+            addD(quadraticH, {z, d},      coeff);
+            addD(quadraticH, {w, c_var},  coeff);
+            addD(quadraticH, {z, w},     -coeff);
+            addD(quadraticH, {z, c_var}, -coeff);
+            addD(quadraticH, {z},         coeff);
+            addD(quadraticH, {a, b},      coeff);
+            addD(quadraticH, {w, a},     -coeff);
+            addD(quadraticH, {w, b},     -coeff);
+            addD(quadraticH, {w},         coeff);
         } else {
             // Negative 4th degree: -|a|*x1*x2*x3*x4 = min_w -|a|*w*(x1+x2+x3+x4-3)
             std::string wname = "w_" + std::to_string(g_auxCounter++);
             int w = G_vars.get(wname);
-            int128_t absC = -coeff;
+            double absC = -coeff;
 
-            addTerm(quadraticH, {w, a},     -absC);    // -w*x1
-            addTerm(quadraticH, {w, b},     -absC);    // -w*x2
-            addTerm(quadraticH, {w, c_var}, -absC);    // -w*x3
-            addTerm(quadraticH, {w, d},     -absC);    // -w*x4
-            addTerm(quadraticH, {w},         3*absC);  // 3*w
+            addD(quadraticH, {w, a},     -absC);
+            addD(quadraticH, {w, b},     -absC);
+            addD(quadraticH, {w, c_var}, -absC);
+            addD(quadraticH, {w, d},     -absC);
+            addD(quadraticH, {w},         3.0 * absC);
         }
     }
 
     // Verify all terms are degree <= 2
     for (auto& [m, c] : quadraticH) {
         if (m.size() > 2) {
-            // This shouldn't happen for factorization (max degree 4 from squaring)
             std::cerr << "WARNING: degree-" << m.size() << " term after quadratization: ";
             for (int v : m) std::cerr << G_vars.name(v) << "*";
             std::cerr << " coeff=" << c << "\n";
@@ -1206,15 +1251,15 @@ QUBODict buildQUBO(const std::vector<Poly>& clauses, double& offset) {
     QUBODict Q;
     offset = 0.0;
     for (auto& [m, c] : quadraticH) {
-        if (m.empty()) { offset += (double)c; continue; }
+        if (m.empty()) { offset += c; continue; }
         if (m.size() == 1) {
             auto key = std::make_pair(m[0], m[0]);
-            Q[key] += (double)c;
+            Q[key] += c;
         } else if (m.size() == 2) {
             int i = m[0], j = m[1];
             if (i > j) std::swap(i, j);
             auto key = std::make_pair(i, j);
-            Q[key] += (double)c;
+            Q[key] += c;
         }
     }
     return Q;
@@ -1565,12 +1610,13 @@ std::vector<int> readSpinsFile(const std::string& filename) {
 // ============================================================
 int main(int argc, char* argv[]) {
     if (argc < 2) {
-        std::cerr << "Usage: " << argv[0] << " <N> [spins_file] [--csr-dir DIR] [--meta-dir DIR] [--backtrack]\n";
+        std::cerr << "Usage: " << argv[0] << " <N> [spins_file] [--csr-dir DIR] [--meta-dir DIR] [--backtrack] [--no-normalize]\n";
         std::cerr << "  Without spins_file: generate QUBO and save CSR files.\n";
         std::cerr << "  With spins_file:    generate QUBO, then post-process the annealer solution.\n";
         std::cerr << "  --csr-dir DIR:      directory for CSR output files (default: cwd)\n";
         std::cerr << "  --meta-dir DIR:     directory for metadata files (default: cwd)\n";
         std::cerr << "  --backtrack:        enable replacement backtracking (smaller QUBO, harder for SA)\n";
+        std::cerr << "  --normalize:        enable per-clause max-abs normalization (default: off)\n";
         std::cerr << "  --verify P Q:       verify QUBO correctness given known factors P and Q\n";
         return 1;
     }
@@ -1582,6 +1628,8 @@ int main(int argc, char* argv[]) {
         if (a == "--csr-dir" && i + 1 < argc) { csrDir = argv[++i]; continue; }
         if (a == "--meta-dir" && i + 1 < argc) { metaDir = argv[++i]; continue; }
         if (a == "--backtrack") { G_enableBacktracking = true; continue; }
+        if (a == "--no-normalize") { G_normalizeClauses = false; continue; }
+        if (a == "--normalize")    { G_normalizeClauses = true;  continue; }
         if (a == "--verify" && i + 2 < argc) { verifyP = argv[++i]; verifyQ = argv[++i]; continue; }
         if (a == "--trace" && i + 1 < argc) { traceFile = argv[++i]; G_trace = true; continue; }
         if (Narg.empty()) Narg = a;

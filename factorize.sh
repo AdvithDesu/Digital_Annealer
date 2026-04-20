@@ -22,6 +22,7 @@
 #
 # QUBO options:
 #   -b, --backtrack        enable replacement backtracking (smaller QUBO)
+#   -n, --normalize        per-clause max-abs normalization (flattens |J| scale)
 
 set -euo pipefail
 
@@ -42,6 +43,7 @@ SWEEPS=10
 SEED=""
 DEBUG_FLAG=""
 BACKTRACK_FLAG=""
+NORMALIZE_FLAG=""
 INPUT_P=""
 INPUT_Q=""
 
@@ -74,6 +76,7 @@ while [[ $# -gt 0 ]]; do
         -s|--seed)         SEED="$2";         shift 2 ;;
         -d|--debug)        DEBUG_FLAG="-d";   shift ;;
         -b|--backtrack)    BACKTRACK_FLAG="--backtrack"; shift ;;
+        -n|--normalize)    NORMALIZE_FLAG="--normalize"; shift ;;
         -p)                INPUT_P="$2";      shift 2 ;;
         -q)                INPUT_Q="$2";      shift 2 ;;
         *) echo "Unknown option: $1" >&2; exit 1 ;;
@@ -125,7 +128,7 @@ mkdir -p "$RESULTS_DIR"
 echo "===== Step 1: QUBO Construction (N=$N) ====="
 echo
 
-"$QUBO_BIN" "$N" --csr-dir "$CSR_DIR/" --meta-dir "$META_DIR/" $BACKTRACK_FLAG
+"$QUBO_BIN" "$N" --csr-dir "$CSR_DIR/" --meta-dir "$META_DIR/" $BACKTRACK_FLAG $NORMALIZE_FLAG
 
 # Verify CSR files were created
 for f in "$CSR_DIR/row_ptr_${N}.csv" \
@@ -182,7 +185,7 @@ echo
 echo "===== Step 3: Post-processing ====="
 echo
 
-"$QUBO_BIN" "$N" "$SPINS_FILE" --csr-dir "$CSR_DIR/" --meta-dir "$META_DIR/" $BACKTRACK_FLAG
+"$QUBO_BIN" "$N" "$SPINS_FILE" --csr-dir "$CSR_DIR/" --meta-dir "$META_DIR/" $BACKTRACK_FLAG $NORMALIZE_FLAG
 
 echo
 echo "===== Pipeline complete ====="
