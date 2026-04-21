@@ -14,11 +14,14 @@
 #
 # SA options:
 #   -x, --start-temp <T>   starting temperature       (default: 100.0)
+#                          pass "-x auto" to estimate T_0 (Ben-Ameur)
 #   -y, --stop-temp  <T>   stopping temperature       (default: 0.1)
 #   -c, --alpha      <a>   geometric cooling rate     (default: 0.95)
 #   -m, --sweeps     <M>   sweeps per beta            (default: 10)
 #   -s, --seed       <S>   RNG seed                   (default: auto)
 #   -d, --debug            enable debug output
+#   --auto-accept-rate <F> target uphill acceptance rate for -x auto (default: 0.5)
+#   --auto-n-config <N>    random configs sampled for -x auto (default: 10)
 #
 # QUBO options:
 #   -b, --backtrack        enable replacement backtracking (smaller QUBO)
@@ -44,6 +47,8 @@ SEED=""
 DEBUG_FLAG=""
 BACKTRACK_FLAG=""
 NORMALIZE_FLAG=""
+AUTO_ACCEPT_RATE=""
+AUTO_N_CONFIG=""
 INPUT_P=""
 INPUT_Q=""
 
@@ -77,6 +82,8 @@ while [[ $# -gt 0 ]]; do
         -d|--debug)        DEBUG_FLAG="-d";   shift ;;
         -b|--backtrack)    BACKTRACK_FLAG="--backtrack"; shift ;;
         -n|--normalize)    NORMALIZE_FLAG="--normalize"; shift ;;
+        --auto-accept-rate) AUTO_ACCEPT_RATE="$2"; shift 2 ;;
+        --auto-n-config)    AUTO_N_CONFIG="$2";    shift 2 ;;
         -p)                INPUT_P="$2";      shift 2 ;;
         -q)                INPUT_Q="$2";      shift 2 ;;
         *) echo "Unknown option: $1" >&2; exit 1 ;;
@@ -160,8 +167,10 @@ H="$CSR_DIR/h_vector_${N}.csv"
 SA_CMD=("$SA_BIN" -R "$R" -C "$C" -V "$V" -l "$H"
         -x "$START_TEMP" -y "$STOP_TEMP" -c "$ALPHA" -m "$SWEEPS"
         -O "$RESULTS_DIR/")
-[[ -n "$SEED" ]]       && SA_CMD+=(-s "$SEED")
-[[ -n "$DEBUG_FLAG" ]] && SA_CMD+=("$DEBUG_FLAG")
+[[ -n "$SEED" ]]              && SA_CMD+=(-s "$SEED")
+[[ -n "$DEBUG_FLAG" ]]        && SA_CMD+=("$DEBUG_FLAG")
+[[ -n "$AUTO_ACCEPT_RATE" ]]  && SA_CMD+=(--auto-accept-rate "$AUTO_ACCEPT_RATE")
+[[ -n "$AUTO_N_CONFIG" ]]     && SA_CMD+=(--auto-n-config "$AUTO_N_CONFIG")
 
 echo "Command: ${SA_CMD[*]}"
 echo
