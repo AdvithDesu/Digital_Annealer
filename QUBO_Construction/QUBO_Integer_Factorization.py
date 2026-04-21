@@ -929,15 +929,15 @@ def final_steps(model,N,np,nq,addn_constr,addn_ass):
       bqm=quadrizate(bqm)
       print("Quadratized BQM has {} non-fixed variables.".format(len(bqm.variables)))
 
-      sampler = SimulatedAnnealingSampler()
-      sampleset = sampler.sample(bqm, num_reads=1000)
-      best_solution = sampleset.first
+    #   sampler = SimulatedAnnealingSampler()
+    #   sampleset = sampler.sample(bqm, num_reads=1000)
+    #   best_solution = sampleset.first
 
-      print(f"Energy: {best_solution.energy}")
-      print(f"Best solution from sampler:",best_solution.sample)
+    #   print(f"Energy: {best_solution.energy}")
+    #   print(f"Best solution from sampler:",best_solution.sample)
 
-      # Create a complete assignment dictionary including sampled variables and fixed p_0, q_0
-      full_assignment = dict(best_solution.sample)
+    #  # Create a complete assignment dictionary including sampled variables and fixed p_0, q_0
+    #   full_assignment = dict(best_solution.sample)
       solv_ind=1
 
    #Compile additional assignments
