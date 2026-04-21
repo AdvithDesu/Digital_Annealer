@@ -305,6 +305,21 @@ __global__ void refreshHubVals(
         int                num_hubs
 );
 
+
+// Per-spin ΔE estimator for auto start-temperature (Ben-Ameur style).
+// Each block handles one spin i, computes ΔE_i = -2 s_i (Σ_j J_ij s_j + h_i)
+// via the same shared-mem reduction as compute_total_energy, then atomically
+// accumulates the uphill (ΔE > 0) contributions into (sum_pos, count_pos).
+__global__ void computeDeltaE_uphill_accum(
+        const int*           row_ptr,
+        const int*           col_idx,
+        const double*        J_values,
+        const double*        gpuLinTermsVect,
+        const signed char*   gpuSpins,
+        double*              d_sum_pos,
+        int*                 d_count_pos
+);
+
 std::vector<double> create_beta_schedule_geometric(uint32_t num_sweeps, double temp_start, double temp_end, double alpha);
   
 static void usage(const char *pname) {
@@ -362,6 +377,9 @@ int main(int argc, char* argv[])
 	double start_temp = 20.0;
 	double stop_temp = 0.001;
 	double alpha = 0.95;
+	bool   auto_start_temp  = false;
+	double auto_accept_rate = 0.5;
+	int    auto_n_config    = 10;
 	unsigned long long seed = ((getpid()* rand()) & 0x7FFFFFFFF); // ((GetCurrentProcessId()* rand()) & 0x7FFFFFFFF);
 	
 	unsigned int num_temps = 1000; //atoi(argv[2]);
@@ -389,6 +407,8 @@ int main(int argc, char* argv[])
 			{ "output-dir", required_argument, 0, 'O'},
 			{          "debug",       no_argument, 0, 'd'},
 			{          "help",       no_argument, 0, 'h'},
+			{ "auto-accept-rate", required_argument, 0, 1001 },
+			{ "auto-n-config",    required_argument, 0, 1002 },
 			{               0,                 0, 0,   0}
 		};
 
@@ -408,7 +428,16 @@ int main(int argc, char* argv[])
 		case 'l':
 			linear_file = (optarg); break;
 		case 'x':
-			start_temp = atof(optarg); break;
+			if (std::string(optarg) == "auto") {
+				auto_start_temp = true;
+			} else {
+				start_temp = atof(optarg);
+			}
+			break;
+		case 1001:
+			auto_accept_rate = atof(optarg); break;
+		case 1002:
+			auto_n_config = atoi(optarg); break;
 		case 'y':
 			stop_temp = atof(optarg); break;
 		case 's':
@@ -439,8 +468,9 @@ int main(int argc, char* argv[])
 	}
 
 	std::cout << "Running sparse SA with:\n"
-			<< " start temp " << start_temp << " stop temp " << stop_temp << "\n" 
-			<< " seed " << seed << " num temp " << num_temps << " num sweeps " 
+			<< " start temp " << (auto_start_temp ? std::string("auto") : std::to_string(start_temp))
+			<< " stop temp " << stop_temp << "\n"
+			<< " seed " << seed << " num temp " << num_temps << " num sweeps "
 			<<  num_sweeps_per_beta << std::endl;
 
 	// --------------------------------------------------
@@ -778,10 +808,87 @@ int main(int argc, char* argv[])
 	// d_total_energy already holds the correct initial value;
 	// applyAllFlipsInColor atomicAdds dE onto it incrementally from here.
 
+	// ── Auto start-temperature estimation (Ben-Ameur, simple form) ──────
+	// Sample ΔE over uphill single-spin flips across N_config random configs,
+	// set T_0 = <ΔE+> / ln(1/chi) so a "typical" uphill move is accepted with
+	// probability chi.  Uses the same GPU buffers + hub cache as annealing.
+	if (auto_start_temp) {
+	    double *d_sum_pos   = nullptr;
+	    int    *d_count_pos = nullptr;
+	    gpuErrchk(cudaMalloc((void**)&d_sum_pos,   sizeof(double)));
+	    gpuErrchk(cudaMalloc((void**)&d_count_pos, sizeof(int)));
+
+	    double total_sum = 0.0;
+	    long long total_cnt = 0;
+
+	    for (int cfg = 0; cfg < auto_n_config; cfg++) {
+	        // Fresh random spins for this config.
+	        curandGenerateUniform(rng, gpu_randvals, num_spins);
+	        {
+	            int blk = (num_spins + 255) / 256;
+	            init_spins_only<<<blk, 256>>>(
+	                gpu_randvals, gpu_spins_old, devRanStates,
+	                (unsigned long)t + (unsigned long)(cfg + 1), (int)num_spins);
+	        }
+	        cudaDeviceSynchronize();
+
+	        // Refresh hub cache for the new spins.
+	        if (h_num_hub > 0) {
+	            int hb = (h_num_hub + 63) / 64;
+	            refreshHubVals<<<hb, 64>>>(gpu_spins_old, gpu_hub_ids, gpu_hub_vals, h_num_hub);
+	            cudaDeviceSynchronize();
+	        }
+
+	        double zero_d = 0.0;
+	        int    zero_i = 0;
+	        gpuErrchk(cudaMemcpy(d_sum_pos,   &zero_d, sizeof(double), cudaMemcpyHostToDevice));
+	        gpuErrchk(cudaMemcpy(d_count_pos, &zero_i, sizeof(int),    cudaMemcpyHostToDevice));
+
+	        computeDeltaE_uphill_accum<<<num_spins, THREADS>>>(
+	            gpu_row_ptr, gpu_col_idx, gpu_J_values,
+	            gpuLinTermsVect, gpu_spins_old, d_sum_pos, d_count_pos);
+	        cudaDeviceSynchronize();
+
+	        double h_sum; int h_cnt;
+	        gpuErrchk(cudaMemcpy(&h_sum, d_sum_pos,   sizeof(double), cudaMemcpyDeviceToHost));
+	        gpuErrchk(cudaMemcpy(&h_cnt, d_count_pos, sizeof(int),    cudaMemcpyDeviceToHost));
+	        total_sum += h_sum;
+	        total_cnt += h_cnt;
+	    }
+
+	    cudaFree(d_sum_pos);
+	    cudaFree(d_count_pos);
+
+	    double mean_dEp = (total_cnt > 0) ? (total_sum / (double)total_cnt) : 1.0;
+	    double T0       = mean_dEp / std::log(1.0 / auto_accept_rate);
+	    std::cout << "Auto start-temp estimation (Ben-Ameur simple form):\n"
+	              << "  N_config = " << auto_n_config
+	              << ", uphill samples = " << total_cnt << "\n"
+	              << "  mean |dE+|          = " << mean_dEp << "\n"
+	              << "  target accept rate  = " << auto_accept_rate << "\n"
+	              << "  ==> initial temp T0 = " << T0 << std::endl;
+	    start_temp = T0;
+
+	    // Recompute initial energy for the last random config (which is also
+	    // the state annealing will start from).
+	    {
+	        double zero = 0.0;
+	        gpuErrchk(cudaMemcpy(d_total_energy, &zero, sizeof(double), cudaMemcpyHostToDevice));
+	    }
+	    compute_total_energy<<<num_spins, THREADS>>>(
+	        gpu_row_ptr, gpu_col_idx, gpu_J_values,
+	        gpuLinTermsVect, gpu_spins_old, gpu_num_spins, d_total_energy);
+	    cudaDeviceSynchronize();
+	    gpuErrchk(cudaMemcpy(gpu_total_energy, d_total_energy,
+	                         sizeof(double), cudaMemcpyDeviceToHost));
+	    gpu_best_energy[0] = gpu_total_energy[0];
+	}
+
 	auto t_setup_end = std::chrono::high_resolution_clock::now();
 	double t_setup = (double)std::chrono::duration_cast<std::chrono::microseconds>(t_setup_end - t_setup_start).count() * 1e-6;
 
-	std::cout << "start annealing with initial energy: " << gpu_best_energy[0] << std::endl;
+	std::cout << "start annealing with initial energy: " << gpu_best_energy[0]
+	          << "  (start_temp = " << start_temp << ")" << std::endl;
 	std::vector<double> beta_schedule = create_beta_schedule_geometric(num_temps, start_temp, stop_temp, alpha);
 
 	auto t0 = std::chrono::high_resolution_clock::now();
@@ -1204,10 +1311,48 @@ __global__ void compute_total_energy(
 	}
 }
 
+__global__ void computeDeltaE_uphill_accum(
+        const int*           row_ptr,
+        const int*           col_idx,
+        const double*        J_values,
+        const double*        gpuLinTermsVect,
+        const signed char*   gpuSpins,
+        double*              d_sum_pos,
+        int*                 d_count_pos)
+{
+    unsigned int vertice_Id = blockIdx.x;
+    unsigned int p_Id       = threadIdx.x;
+
+    __shared__ double sh_mem[THREADS];
+    sh_mem[p_Id] = 0.0;
+    __syncthreads();
+
+    int start = row_ptr[vertice_Id];
+    int end   = row_ptr[vertice_Id + 1];
+    for (int k = start + p_Id; k < end; k += blockDim.x) {
+        sh_mem[p_Id] += J_values[k] * (double)gpuSpins[col_idx[k]];
+    }
+    __syncthreads();
+
+    for (int off = blockDim.x / 2; off; off /= 2) {
+        if (p_Id < off) sh_mem[p_Id] += sh_mem[p_Id + off];
+        __syncthreads();
+    }
+
+    if (p_Id == 0) {
+        double dE = -2.0 * (double)gpuSpins[vertice_Id]
+                    * (sh_mem[0] + gpuLinTermsVect[vertice_Id]);
+        if (dE > 0.0) {
+            atomicAdd(d_sum_pos, dE);
+            atomicAdd(d_count_pos, 1);
+        }
+    }
+}
+
 std::vector<double> create_beta_schedule_geometric(
-		uint32_t num_sweeps, 
+		uint32_t num_sweeps,
 		double temp_start,
-		double temp_end, 
+		double temp_end,
 		double alpha){
 
 	std::vector<double> beta_schedule;
