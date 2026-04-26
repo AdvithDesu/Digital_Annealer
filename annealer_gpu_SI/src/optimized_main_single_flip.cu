@@ -781,8 +781,14 @@ int main(int argc, char* argv[])
 	cudaHostAlloc(&gpu_best_energy, sizeof(double), 0);
  
 	signed char *gpu_spins_old;
-	
 	gpuErrchk(cudaMalloc((void**)&gpu_spins_old, num_spins * sizeof(signed char)));
+
+	// Best-state mirror: snapshot of gpu_spins_old at the lowest running energy
+	// observed during annealing. The output spin file is written from this buffer
+	// so we report the best state encountered, not whatever state happened to be
+	// live at the final temperature step.
+	signed char *gpu_spins_best;
+	gpuErrchk(cudaMalloc((void**)&gpu_spins_best, num_spins * sizeof(signed char)));
 
 	FlipCandidate* gpu_candidates;
 	gpuErrchk(cudaMalloc((void**)&gpu_candidates, num_spins * sizeof(FlipCandidate)));
@@ -862,6 +868,9 @@ int main(int argc, char* argv[])
 	gpuErrchk(cudaPeekAtLastError());
 
 	gpu_best_energy[0] = gpu_total_energy[0];
+	gpuErrchk(cudaMemcpy(gpu_spins_best, gpu_spins_old,
+	                     num_spins * sizeof(signed char),
+	                     cudaMemcpyDeviceToDevice));
 
 	// d_total_energy already holds the correct initial value;
 	// applyAllFlipsInColor atomicAdds dE onto it incrementally from here.
@@ -940,6 +949,9 @@ int main(int argc, char* argv[])
 	    gpuErrchk(cudaMemcpy(gpu_total_energy, d_total_energy,
 	                         sizeof(double), cudaMemcpyDeviceToHost));
 	    gpu_best_energy[0] = gpu_total_energy[0];
+	    gpuErrchk(cudaMemcpy(gpu_spins_best, gpu_spins_old,
+	                         num_spins * sizeof(signed char),
+	                         cudaMemcpyDeviceToDevice));
 	}
 
 	auto t_setup_end = std::chrono::high_resolution_clock::now();
@@ -1030,7 +1042,16 @@ int main(int argc, char* argv[])
 		cudaDeviceSynchronize();
 		gpuErrchk(cudaMemcpy(gpu_total_energy, d_total_energy,
 		                     sizeof(double), cudaMemcpyDeviceToHost));
-		gpu_best_energy[0] = std::min(gpu_total_energy[0], gpu_best_energy[0]);
+		// Whenever the running accumulator reports a new best, snapshot the
+		// live spins into gpu_spins_best. The D2D copy runs on the default
+		// stream so it serializes after the annealing kernels of this temp
+		// step and before the next one starts.
+		if (gpu_total_energy[0] < gpu_best_energy[0]) {
+			gpu_best_energy[0] = gpu_total_energy[0];
+			gpuErrchk(cudaMemcpyAsync(gpu_spins_best, gpu_spins_old,
+			                          num_spins * sizeof(signed char),
+			                          cudaMemcpyDeviceToDevice));
+		}
 		energy_history.push_back(gpu_best_energy[0]);
 	}
  
@@ -1055,29 +1076,42 @@ int main(int argc, char* argv[])
     // Heap-allocated to avoid stack overflow at large N (was a VLA on the stack).
     std::vector<signed char> cpu_spins(num_spins);
 
-	// Snapshot the running (atomicAdd-tracked) energy before we overwrite it
-	// with a fresh from-scratch recomputation. Comparing the two is the
-	// correctness check for the chromatic parallel-flip accumulator.
+	// Snapshot the running (atomicAdd-tracked) energy. We recompute energy
+	// from scratch for two states:
+	//   (a) gpu_spins_old   — the live state at the end of annealing; used
+	//                         only to validate the running accumulator (drift
+	//                         diagnostic).
+	//   (b) gpu_spins_best  — the lowest-running-energy state we observed;
+	//                         this is what we report and write to the spin file.
 	double running_energy = gpu_total_energy[0];
 
+	// (a) Recompute energy of the final running state for drift diagnostic.
+	double final_state_energy;
 	{
 		double zero = 0.0;
 		gpuErrchk(cudaMemcpy(d_total_energy, &zero, sizeof(double), cudaMemcpyHostToDevice));
+		compute_total_energy<<<num_spins, THREADS>>>(
+			gpu_row_ptr, gpu_col_idx, gpu_J_values,
+			gpuLinTermsVect, gpu_spins_old, gpu_num_spins, d_total_energy);
+		cudaDeviceSynchronize();
+		gpuErrchk(cudaMemcpy(&final_state_energy, d_total_energy,
+		                     sizeof(double), cudaMemcpyDeviceToHost));
 	}
+
+	// (b) Recompute energy of the best state and copy it back to host.
+	double best_state_energy;
 	{
-        compute_total_energy<<<num_spins, THREADS>>>(gpu_row_ptr,
-				gpu_col_idx,
-				gpu_J_values,
-				gpuLinTermsVect,
-				gpu_spins_old,
-				gpu_num_spins,
-				d_total_energy
-		);
-
-  		cudaDeviceSynchronize();
-
-	    gpuErrchk(cudaMemcpy(gpu_total_energy, d_total_energy, sizeof(double), cudaMemcpyDeviceToHost));
-        gpuErrchk(cudaMemcpy(cpu_spins.data(), gpu_spins_old, num_spins * sizeof(signed char), cudaMemcpyDeviceToHost));
+		double zero = 0.0;
+		gpuErrchk(cudaMemcpy(d_total_energy, &zero, sizeof(double), cudaMemcpyHostToDevice));
+		compute_total_energy<<<num_spins, THREADS>>>(
+			gpu_row_ptr, gpu_col_idx, gpu_J_values,
+			gpuLinTermsVect, gpu_spins_best, gpu_num_spins, d_total_energy);
+		cudaDeviceSynchronize();
+		gpuErrchk(cudaMemcpy(&best_state_energy, d_total_energy,
+		                     sizeof(double), cudaMemcpyDeviceToHost));
+		gpuErrchk(cudaMemcpy(cpu_spins.data(), gpu_spins_best,
+		                     num_spins * sizeof(signed char),
+		                     cudaMemcpyDeviceToHost));
 	}
 
 	{
@@ -1091,16 +1125,16 @@ int main(int argc, char* argv[])
 		fclose(fptr1);
 	}
 
-	printf("\t total energy value: %.6f\n", gpu_total_energy[0]);
-	printf("best engy %.6f\n", gpu_best_energy[0]);
+	printf("\t final-state energy (recomputed): %.6f\n", final_state_energy);
+	printf("\t best-state  energy (recomputed): %.6f\n", best_state_energy);
+	printf("best engy (running tracker): %.6f\n", gpu_best_energy[0]);
 
 	{
-		double recomputed = gpu_total_energy[0];
-		double diff = running_energy - recomputed;
-		double denom = std::max(1.0, std::fabs(recomputed));
+		double diff = running_energy - final_state_energy;
+		double denom = std::max(1.0, std::fabs(final_state_energy));
 		printf("energy check: running=%.6f recomputed=%.6f"
 		       " diff=%.6f (rel=%.3e)\n",
-		       running_energy, recomputed, diff,
+		       running_energy, final_state_energy, diff,
 		       diff / denom);
 	}
 
@@ -1127,6 +1161,7 @@ int main(int argc, char* argv[])
 	cudaFree(gpu_J_values);
 	cudaFree(gpu_num_spins);
 	cudaFree(gpu_spins_old);
+	cudaFree(gpu_spins_best);
 	cudaFree(d_total_energy);
 	cudaFree(devRanStates);
 	cudaFree(gpu_candidates);
