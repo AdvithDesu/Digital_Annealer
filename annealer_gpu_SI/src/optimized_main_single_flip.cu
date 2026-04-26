@@ -96,6 +96,67 @@ struct SparseCSR {
     int                  nnz_hub_fallback = 0;
 };
 
+// Sampled symmetry check for the J-matrix CSR.
+// The energy formula E = ½ s'Js + h's and the ΔE formula
+//   dE = -2 s_i (Σ_j J_ij s_j + h_i)
+// are correct only when the CSR stores BOTH J_ij and J_ji with equal value.
+// We verify this on a random subset of rows: cheap (microseconds even at N=1e6),
+// catches accidental upper-triangular-only inputs.
+static void verifySymmetrySampled(
+    const std::vector<int>&    row_ptr,
+    const std::vector<int>&    col_idx,
+    const std::vector<double>& J_values,
+    int                        num_spins,
+    int                        num_sample_rows = 128,
+    double                     rel_tol = 1e-9)
+{
+    if (num_spins <= 0) return;
+
+    // Deterministic sampler so failures are reproducible across runs.
+    unsigned int rng_state = 0xC0FFEEu ^ (unsigned int)num_spins;
+    auto next_rand = [&]() {
+        rng_state = rng_state * 1664525u + 1013904223u;
+        return rng_state;
+    };
+
+    int rows_to_sample = std::min(num_sample_rows, num_spins);
+    int missing = 0, mismatched = 0, checked = 0;
+
+    for (int s = 0; s < rows_to_sample; s++) {
+        int i = (int)(next_rand() % (unsigned int)num_spins);
+        for (int k = row_ptr[i]; k < row_ptr[i + 1]; k++) {
+            int    j   = col_idx[k];
+            double Jij = J_values[k];
+            if (j == i) continue;  // diagonals don't need a partner
+            checked++;
+
+            // Search row j for column i (linear; rows are short by assumption).
+            bool found = false;
+            for (int kk = row_ptr[j]; kk < row_ptr[j + 1]; kk++) {
+                if (col_idx[kk] == i) {
+                    double Jji = J_values[kk];
+                    double scale = std::max(1.0, std::max(std::fabs(Jij), std::fabs(Jji)));
+                    if (std::fabs(Jij - Jji) > rel_tol * scale) mismatched++;
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) missing++;
+        }
+    }
+
+    if (missing || mismatched) {
+        fprintf(stderr,
+                "FATAL: J-matrix CSR is not symmetric "
+                "(sampled %d rows, %d entries; missing partners=%d, value mismatches=%d).\n"
+                "Energy and dE assume both J_ij and J_ji are stored with equal value.\n",
+                rows_to_sample, checked, missing, mismatched);
+        std::exit(1);
+    }
+    std::cout << "Symmetry check passed (sampled " << rows_to_sample
+              << " rows, " << checked << " entries)." << std::endl;
+}
+
 // Welsh-Powell style greedy coloring: largest-degree-first, first-fit.
 // Returns color_of[num_spins] and num_colors via out-param.
 static std::vector<int> buildGreedyColoring(
@@ -320,7 +381,7 @@ __global__ void computeDeltaE_uphill_accum(
         int*                 d_count_pos
 );
 
-std::vector<double> create_beta_schedule_geometric(uint32_t num_sweeps, double temp_start, double temp_end, double alpha);
+std::vector<double> create_beta_schedule_geometric(double temp_start, double temp_end, double alpha);
   
 static void usage(const char *pname) {
 
@@ -344,13 +405,11 @@ static void usage(const char *pname) {
 		"\t-y|--stop temperature <FLOAT>\n"
 		"\t\tnumber of lattice columns\n"
 		"\n"
-		"\t-n|--niters <INT>\n"
-		"\t\tnumber of iterations\n"
-		"\n"
 		"\t-c|--alpha <FLOAT>\n"
-		"\t\tcooling rate (temperature multiplier, 0 < alpha < 1, default: 0.95)"
+		"\t\tcooling rate (temperature multiplier, 0 < alpha < 1, default: 0.95)\n"
+		"\t\t(number of temperature steps is derived from start/stop/alpha)\n"
 		"\n"
-		"\t-n|--sweeps_per_beta <INT>\n"
+		"\t-m|--sweeps_per_beta <INT>\n"
 		"\t\tnumber of sweep per temperature\n"
 		"\n"
 		"\t-s|--seed <SEED>\n"
@@ -382,7 +441,6 @@ int main(int argc, char* argv[])
 	int    auto_n_config    = 10;
 	unsigned long long seed = ((getpid()* rand()) & 0x7FFFFFFFF); // ((GetCurrentProcessId()* rand()) & 0x7FFFFFFFF);
 	
-	unsigned int num_temps = 1000; //atoi(argv[2]);
 	unsigned int num_sweeps_per_beta = 1;//atoi(argv[3]);
 	
 	std::string output_dir = "";
@@ -402,7 +460,6 @@ int main(int argc, char* argv[])
 			{     "stop_temp", required_argument, 0, 'y'},
 			{          "seed", required_argument, 0, 's'},
 			{ "alpha", required_argument, 0, 'c'},
-			{        "niters", required_argument, 0, 'n'},
 			{ "sweeps_per_beta", required_argument, 0, 'm'},
 			{ "output-dir", required_argument, 0, 'O'},
 			{          "debug",       no_argument, 0, 'd'},
@@ -413,7 +470,7 @@ int main(int argc, char* argv[])
 		};
 
 		int option_index = 0;
-		int ch = getopt_long(argc, argv, "R:C:V:l:x:y:s:c:n:m:O:dh", long_options, &option_index);
+		int ch = getopt_long(argc, argv, "R:C:V:l:x:y:s:c:m:O:dh", long_options, &option_index);
 		if (ch == -1) break;
 
 		switch (ch) {
@@ -446,8 +503,6 @@ int main(int argc, char* argv[])
 		case 'c': 
 			alpha = atof(optarg); 
 			break;
-		case 'n':
-			num_temps = atoi(optarg); break;
 		case 'm':
 			num_sweeps_per_beta = atoi(optarg); break;
 		case 'O':
@@ -470,7 +525,7 @@ int main(int argc, char* argv[])
 	std::cout << "Running sparse SA with:\n"
 			<< " start temp " << (auto_start_temp ? std::string("auto") : std::to_string(start_temp))
 			<< " stop temp " << stop_temp << "\n"
-			<< " seed " << seed << " num temp " << num_temps << " num sweeps "
+			<< " seed " << seed << " num sweeps per beta "
 			<<  num_sweeps_per_beta << std::endl;
 
 	// --------------------------------------------------
@@ -539,6 +594,9 @@ int main(int argc, char* argv[])
 	
 	std::cout << "Sparse J loaded: num_spins = "
 	          << num_spins << ", nnz = " << nnz << std::endl;
+
+	// Verify CSR symmetry assumption (cheap sampled check; aborts on failure).
+	verifySymmetrySampled(row_ptr, col_idx, J_values, (int)num_spins);
 
 	auto t_setup_start = std::chrono::high_resolution_clock::now();
 
@@ -889,7 +947,8 @@ int main(int argc, char* argv[])
 
 	std::cout << "start annealing with initial energy: " << gpu_best_energy[0]
 	          << "  (start_temp = " << start_temp << ")" << std::endl;
-	std::vector<double> beta_schedule = create_beta_schedule_geometric(num_temps, start_temp, stop_temp, alpha);
+	std::vector<double> beta_schedule = create_beta_schedule_geometric(start_temp, stop_temp, alpha);
+	std::cout << "Beta schedule length (derived): " << beta_schedule.size() << std::endl;
 
 	auto t0 = std::chrono::high_resolution_clock::now();
 	auto annealing_start = std::chrono::high_resolution_clock::now();
@@ -993,7 +1052,8 @@ int main(int argc, char* argv[])
 	}
 	fclose(energy_fptr);
 
-    signed char cpu_spins[num_spins];
+    // Heap-allocated to avoid stack overflow at large N (was a VLA on the stack).
+    std::vector<signed char> cpu_spins(num_spins);
 
 	// Snapshot the running (atomicAdd-tracked) energy before we overwrite it
 	// with a fresh from-scratch recomputation. Comparing the two is the
@@ -1017,7 +1077,7 @@ int main(int argc, char* argv[])
   		cudaDeviceSynchronize();
 
 	    gpuErrchk(cudaMemcpy(gpu_total_energy, d_total_energy, sizeof(double), cudaMemcpyDeviceToHost));
-        gpuErrchk(cudaMemcpy(cpu_spins, gpu_spins_old, num_spins * sizeof(signed char), cudaMemcpyDeviceToHost));
+        gpuErrchk(cudaMemcpy(cpu_spins.data(), gpu_spins_old, num_spins * sizeof(signed char), cudaMemcpyDeviceToHost));
 	}
 
 	{
@@ -1350,18 +1410,18 @@ __global__ void computeDeltaE_uphill_accum(
 }
 
 std::vector<double> create_beta_schedule_geometric(
-		uint32_t num_sweeps,
 		double temp_start,
 		double temp_end,
 		double alpha){
 
 	std::vector<double> beta_schedule;
 	double current_temp = temp_start;
-	
-	// Calculate required iterations to reach temp_end (if num_sweeps not specified)
-	num_sweeps = log(temp_end / temp_start) / log(alpha);
-	
-	for (int i = 0; i < num_sweeps; i++){
+
+	// Number of temperature steps is fully determined by start/stop/alpha:
+	// N such that temp_start * alpha^N <= temp_end  =>  N = ceil(log(temp_end/temp_start)/log(alpha)).
+	uint32_t num_sweeps = (uint32_t)std::ceil(std::log(temp_end / temp_start) / std::log(alpha));
+
+	for (uint32_t i = 0; i < num_sweeps; i++){
 
 		beta_schedule.push_back(1.0 / current_temp);
 		current_temp *= alpha;
