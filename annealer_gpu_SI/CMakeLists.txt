@@ -34,6 +34,7 @@ target_compile_options(${TARGET}
     $<$<CONFIG:DEBUG>:$<BUILD_INTERFACE:${debug_compile_flags}>>
   )
 message("${CMAKE_BINARY_DIR}/x64/Debug/ALL_BUILD", "&&&&&&&&&&&")
-install(TARGETS ${TARGET} DESTINATION "${CMAKE_SOURCE_DIR}/bin_SI")
+set(INSTALL_DEST "${CMAKE_SOURCE_DIR}/bin_SI")
+install(TARGETS ${TARGET} DESTINATION ${INSTALL_DEST})
 #install(TARGETS ${TARGET} DESTINATION "${CMAKE_BINARY_DIR}/x64/Release/ALL_BUILD")
 
