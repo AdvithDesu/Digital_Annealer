@@ -1,86 +1,126 @@
 #!/bin/bash
-# Benchmark factorize.sh across a table of (P, Q, start_temp) cases.
-# Produces CSV with P, Q, start_temp, end_temp, alpha, P_pred, Q_pred, t_anneal.
+# Sweep factorize.sh across a range of bit sizes.
+# For each B in BITS_LIST, generate two random B-bit primes (P, Q), run
+# factorize.sh on N=P*Q, and record solution-quality + timing metrics to CSV.
 #
-# Usage: ./benchmark.sh [output_csv]
+# Columns: bits, P, Q, N, P_pred, Q_pred, correct, t_construct, t_anneal, best_energy
+#
+# Usage: ./benchmark.sh [options] [output_csv]
+#
+# Options (all forwarded to factorize.sh):
+#   -x <T>    start temp; "auto" for Ben-Ameur estimation     (default: auto)
+#   -y <T>    stop temp                                        (default: 1e-8)
+#   -c <a>    geometric cooling rate                           (default: 0.95)
+#   -m <M>    sweeps per beta                                  (default: 10)
+#   -a <F>    target uphill accept rate (only for -x auto)     (default: 0.5)
+#   -B <list> comma-separated bit sizes (e.g. 8,16,24,32)
+#             default: 8,10,12,...,62
+#   -o <csv>  output csv path (also accepted as positional)    (default: benchmark_results.csv)
+#   -h        show this help
 
 set -u
 
-OUT="${1:-benchmark_results.csv}"
-START_TEMP=10
+# ── SA defaults (overridable via CLI) ────────────────────────
+START_TEMP="auto"        # "auto" -> Ben-Ameur estimation in CUDA SA
+STOP_TEMP=1e-8
 ALPHA=0.95
 SWEEPS=10
-# End temp schedule: case idx 1..3 -> 1e-6, 4..6 -> 1e-7, 7..9 -> 1e-8, ...
-# i.e. END_TEMP = 10^(-6 - floor((idx-1)/3))
+ACCEPT_RATE=0.5          # target uphill accept rate when -x auto
 
-# ── Test cases: P Q ──────────────────────────────────────────
-CASES=(
-    "151             163"
-    "197             199"
-    "223             229"
-    "397             401"
-    "577             587"
-    "317             331"
-    "547             691"
-    "691             761"
-    "1301            1471"
-    "2351            2879"
-    "4637            5021"
-    "10831           12007"
-    "17749           24611"
-    "52009           68863"
-    "148061          183343"
-    "288803          312229"
-    "591113          617401"
-    "1348271         1821233"
-    "3200003         3711091"
-    "2499023255567   3099023255561"
-    "642949953421331 812949953421371"
-)
+# ── Bit sizes default: 8, 10, 12, ..., 62 ────────────────────
+BITS_LIST=()
+for b in $(seq 8 2 62); do BITS_LIST+=("$b"); done
+
+OUT=""
+
+# ── Parse CLI ────────────────────────────────────────────────
+while getopts ":x:y:c:m:a:B:o:h" opt; do
+    case "$opt" in
+        x) START_TEMP="$OPTARG" ;;
+        y) STOP_TEMP="$OPTARG" ;;
+        c) ALPHA="$OPTARG" ;;
+        m) SWEEPS="$OPTARG" ;;
+        a) ACCEPT_RATE="$OPTARG" ;;
+        B) IFS=',' read -ra BITS_LIST <<< "$OPTARG" ;;
+        o) OUT="$OPTARG" ;;
+        h) sed -n '2,20p' "$0"; exit 0 ;;
+        \?) echo "Unknown option: -$OPTARG" >&2; exit 1 ;;
+        :)  echo "Option -$OPTARG requires an argument" >&2; exit 1 ;;
+    esac
+done
+shift $((OPTIND - 1))
+
+# Positional fallback for output csv
+[[ -z "$OUT" && $# -gt 0 ]] && OUT="$1"
+[[ -z "$OUT" ]] && OUT="benchmark_results.csv"
+
+echo "Settings: start=$START_TEMP stop=$STOP_TEMP alpha=$ALPHA sweeps=$SWEEPS accept=$ACCEPT_RATE"
+echo "Bits: ${BITS_LIST[*]}"
+echo "Output: $OUT"
+echo
+
+# ── Random prime generator ───────────────────────────────────
+gen_prime() {
+    # gen_prime <bits> -> stdout
+    python3 -c "
+import os, random
+from sympy import randprime
+random.seed(int.from_bytes(os.urandom(8), 'little'))
+b = $1
+print(randprime(2**(b-1), 2**b))
+"
+}
 
 # Header
-echo "P,Q,start_temp,end_temp,alpha,P_pred,Q_pred,t_anneal_sec,correct" > "$OUT"
+echo "bits,P,Q,N,P_pred,Q_pred,correct,t_construct,t_anneal,best_energy" > "$OUT"
 
-idx=0
-for case in "${CASES[@]}"; do
-    idx=$((idx + 1))
-    read -r P Q <<< "$case"
+for BITS in "${BITS_LIST[@]}"; do
+    P=$(gen_prime "$BITS")
+    Q=$(gen_prime "$BITS")
+    while [[ "$P" == "$Q" ]]; do
+        Q=$(gen_prime "$BITS")
+    done
+    N=$(python3 -c "print($P * $Q)")
 
-    # End-temp step: 1e-6 for cases 1-3, 1e-7 for 4-6, 1e-8 for 7-9, ...
-    exp=$(( 6 + (idx - 1) / 3 ))
-    END_TEMP="1e-${exp}"
+    echo "===== bits=$BITS  P=$P  Q=$Q  N=$N ====="
 
-    echo "===== [$idx] P=$P  Q=$Q  start_temp=$START_TEMP  end_temp=$END_TEMP ====="
-    LOG=$(./factorize.sh -p "$P" -q "$Q" -x "$START_TEMP" -y "$END_TEMP" -c "$ALPHA" -m "$SWEEPS" 2>&1)
+    LOG=$(./factorize.sh -p "$P" -q "$Q" \
+            -x "$START_TEMP" -y "$STOP_TEMP" -c "$ALPHA" -m "$SWEEPS" \
+            --auto-accept-rate "$ACCEPT_RATE" 2>&1)
     rc=$?
 
     if [[ $rc -ne 0 ]]; then
         echo "  factorize.sh failed (rc=$rc)"
-        echo "$P,$Q,$START_TEMP,$END_TEMP,$ALPHA,ERROR,ERROR,ERROR,FAIL" >> "$OUT"
+        echo "$BITS,$P,$Q,$N,ERROR,ERROR,FAIL,?,?,?" >> "$OUT"
         continue
     fi
 
-    # Parse annealing time: "  Annealing:   <t> s"
-    T_ANNEAL=$(echo "$LOG" | grep -E "^\s*Annealing:" | awk '{print $2}' | tail -1)
+    # ── Parse metrics from log ──────────────────────────────
+    # Construction time: first occurrence (Step 1, QUBO build)
+    T_CONSTRUCT=$(echo "$LOG" | grep -E "^Total construction time:" | awk '{print $4}' | head -1)
+    T_ANNEAL=$(echo "$LOG"    | grep -E "^[[:space:]]*Annealing:"   | awk '{print $2}' | tail -1)
+    # Use the recomputed best-state energy (re-evaluated after annealing — less drift than the running tracker)
+    BEST_E=$(echo "$LOG" | grep -E "best-state[[:space:]]+energy[[:space:]]+\(recomputed\)" \
+                        | awk -F': ' '{print $2}' | tail -1)
 
-    # Parse predicted factors: "Factors of N: P = <val>, Q = <val>"
     PRED_LINE=$(echo "$LOG" | grep "^Factors of " | tail -1)
     P_PRED=$(echo "$PRED_LINE" | sed -n 's/.*P = \([0-9]*\), Q = .*/\1/p')
     Q_PRED=$(echo "$PRED_LINE" | sed -n 's/.*Q = \([0-9]*\).*/\1/p')
 
-    # Check CORRECT / INCORRECT
     if echo "$LOG" | grep -q "(CORRECT)"; then
         STATUS="CORRECT"
     else
         STATUS="INCORRECT"
     fi
 
-    [[ -z "$P_PRED" ]]   && P_PRED="?"
-    [[ -z "$Q_PRED" ]]   && Q_PRED="?"
-    [[ -z "$T_ANNEAL" ]] && T_ANNEAL="?"
+    [[ -z "$P_PRED" ]]      && P_PRED="?"
+    [[ -z "$Q_PRED" ]]      && Q_PRED="?"
+    [[ -z "$T_CONSTRUCT" ]] && T_CONSTRUCT="?"
+    [[ -z "$T_ANNEAL" ]]    && T_ANNEAL="?"
+    [[ -z "$BEST_E" ]]      && BEST_E="?"
 
-    echo "  P_pred=$P_PRED  Q_pred=$Q_PRED  t_anneal=${T_ANNEAL}s  [$STATUS]"
-    echo "$P,$Q,$START_TEMP,$END_TEMP,$ALPHA,$P_PRED,$Q_PRED,$T_ANNEAL,$STATUS" >> "$OUT"
+    echo "  P_pred=$P_PRED  Q_pred=$Q_PRED  best_E=$BEST_E  t_J=${T_CONSTRUCT}s  t_SA=${T_ANNEAL}s  [$STATUS]"
+    echo "$BITS,$P,$Q,$N,$P_PRED,$Q_PRED,$STATUS,$T_CONSTRUCT,$T_ANNEAL,$BEST_E" >> "$OUT"
 done
 
 echo ""
