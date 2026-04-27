@@ -984,8 +984,10 @@ SimplifierResult clauseSimplifier(std::vector<Poly> clauses) {
                 for (auto& [v, expr] : sortByName(cons)) {
                     std::string nm = G_vars.name(v);
                     traceExpr(iter, "rule_3", ci, nm, expr);
-                    if (nm[0] == 'p' || nm[0] == 'q')
-                        result.expressionConstraints.push_back({nm, expr});
+                    // Record EVERY expression substitution, not just p_/q_.
+                    // postProcess chains through s_/w_ entries to resolve p_/q_
+                    // expressions whose RHS references later-eliminated vars.
+                    result.expressionConstraints.push_back({nm, expr});
                     applyExprSub(result.clauses, v, expr);
                 }
                 changed = true;
@@ -1001,8 +1003,10 @@ SimplifierResult clauseSimplifier(std::vector<Poly> clauses) {
                 for (auto& [v, expr] : sortByName(cons)) {
                     std::string nm = G_vars.name(v);
                     traceExpr(iter, "rule_6", ci, nm, expr);
-                    if (nm[0] == 'p' || nm[0] == 'q')
-                        result.expressionConstraints.push_back({nm, expr});
+                    // Record EVERY expression substitution, not just p_/q_.
+                    // postProcess chains through s_/w_ entries to resolve p_/q_
+                    // expressions whose RHS references later-eliminated vars.
+                    result.expressionConstraints.push_back({nm, expr});
                     applyExprSub(result.clauses, v, expr);
                 }
                 changed = true;
@@ -1018,8 +1022,10 @@ SimplifierResult clauseSimplifier(std::vector<Poly> clauses) {
                 for (auto& [v, expr] : sortByName(cons)) {
                     std::string nm = G_vars.name(v);
                     traceExpr(iter, "parity", ci, nm, expr);
-                    if (nm[0] == 'p' || nm[0] == 'q')
-                        result.expressionConstraints.push_back({nm, expr});
+                    // Record EVERY expression substitution, not just p_/q_.
+                    // postProcess chains through s_/w_ entries to resolve p_/q_
+                    // expressions whose RHS references later-eliminated vars.
+                    result.expressionConstraints.push_back({nm, expr});
                     applyExprSub(result.clauses, v, expr);
                 }
                 changed = true;
@@ -1043,8 +1049,10 @@ SimplifierResult clauseSimplifier(std::vector<Poly> clauses) {
                 for (auto& [v, expr] : sortByName(cons)) {
                     std::string nm = G_vars.name(v);
                     traceExpr(iter, "replacement", -1, nm, expr);
-                    if (nm[0] == 'p' || nm[0] == 'q')
-                        result.expressionConstraints.push_back({nm, expr});
+                    // Record EVERY expression substitution, not just p_/q_.
+                    // postProcess chains through s_/w_ entries to resolve p_/q_
+                    // expressions whose RHS references later-eliminated vars.
+                    result.expressionConstraints.push_back({nm, expr});
                     applyExprSub(result.clauses, v, expr);
                 }
                 changed = true;
