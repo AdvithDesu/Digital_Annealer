@@ -9,16 +9,21 @@
 #
 # Options:
 #   -x, --start-temp <T>   starting temperature       (default: 100.0)
+#                          pass "-x auto" to estimate T_0 (Ben-Ameur)
 #   -y, --stop-temp  <T>   stopping temperature       (default: 0.1)
 #   -c, --alpha      <a>   geometric cooling rate     (default: 0.95)
 #   -m, --sweeps     <M>   sweeps per beta            (default: 10)
 #   -s, --seed       <S>   RNG seed                   (default: auto)
 #   -d, --debug            enable debug output from the binary
+#   -O, --output-dir <DIR> dir for spins / energy_history files (default: results/)
+#   --auto-accept-rate <F> target uphill accept rate for -x auto (default: 0.5)
+#   --auto-n-config <N>    random configs sampled for -x auto (default: 10)
 
 set -euo pipefail
 
 BINARY="./build/annealer_gpu_SI/annealer_gpu_SI"
 DIR="bin_SI"
+RESULTS_DIR="results"
 
 # Defaults
 START_TEMP=100.0
@@ -27,6 +32,8 @@ ALPHA=0.95
 SWEEPS=10
 SEED=""
 DEBUG_FLAG=""
+AUTO_ACCEPT_RATE=""
+AUTO_N_CONFIG=""
 
 if [[ $# -lt 1 ]]; then
     echo "Usage: $0 <N> [options]" >&2
@@ -44,12 +51,15 @@ shift
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        -x|--start-temp)   START_TEMP="$2";   shift 2 ;;
-        -y|--stop-temp)    STOP_TEMP="$2";    shift 2 ;;
-        -c|--alpha)        ALPHA="$2";        shift 2 ;;
-        -m|--sweeps)       SWEEPS="$2";       shift 2 ;;
-        -s|--seed)         SEED="$2";         shift 2 ;;
-        -d|--debug)        DEBUG_FLAG="-d";   shift ;;
+        -x|--start-temp)    START_TEMP="$2";       shift 2 ;;
+        -y|--stop-temp)     STOP_TEMP="$2";        shift 2 ;;
+        -c|--alpha)         ALPHA="$2";            shift 2 ;;
+        -m|--sweeps)        SWEEPS="$2";           shift 2 ;;
+        -s|--seed)          SEED="$2";             shift 2 ;;
+        -d|--debug)         DEBUG_FLAG="-d";       shift ;;
+        -O|--output-dir)    RESULTS_DIR="$2";      shift 2 ;;
+        --auto-accept-rate) AUTO_ACCEPT_RATE="$2"; shift 2 ;;
+        --auto-n-config)    AUTO_N_CONFIG="$2";    shift 2 ;;
         *) echo "Unknown option: $1" >&2; exit 1 ;;
     esac
 done
@@ -71,10 +81,15 @@ if [[ ! -x "$BINARY" ]]; then
     exit 1
 fi
 
+mkdir -p "$RESULTS_DIR"
+
 CMD=("$BINARY" -R "$R" -C "$C" -V "$V" -l "$H"
-     -x "$START_TEMP" -y "$STOP_TEMP" -c "$ALPHA" -m "$SWEEPS")
-[[ -n "$SEED" ]]       && CMD+=(-s "$SEED")
-[[ -n "$DEBUG_FLAG" ]] && CMD+=("$DEBUG_FLAG")
+     -x "$START_TEMP" -y "$STOP_TEMP" -c "$ALPHA" -m "$SWEEPS"
+     -O "$RESULTS_DIR/")
+[[ -n "$SEED" ]]              && CMD+=(-s "$SEED")
+[[ -n "$DEBUG_FLAG" ]]        && CMD+=("$DEBUG_FLAG")
+[[ -n "$AUTO_ACCEPT_RATE" ]]  && CMD+=(--auto-accept-rate "$AUTO_ACCEPT_RATE")
+[[ -n "$AUTO_N_CONFIG" ]]     && CMD+=(--auto-n-config "$AUTO_N_CONFIG")
 
 echo "===== Running N=$N ====="
 echo "Command: ${CMD[*]}"
@@ -112,9 +127,9 @@ COLOR_SIZES=$(grab "color-class"    | sed -n 's/.*color-class sizes: *//p')
 NNZ_FB=$(grab    "non-hub fallbacks"| sed -n 's/.*non-hub fallbacks=\([0-9]*\) .*/\1/p')
 FB_PCT=$(grab    "non-hub fallbacks"| sed -n 's/.*(\([0-9.]*\)%).*/\1/p')
 
-INIT_ENERGY=$(grab  "initial energy"     | sed -n 's/.*initial energy:* *\(-\?[0-9eE.+-]*\).*/\1/p')
-FINAL_ENERGY=$(grab "total energy value" | sed -n 's/.*total energy value: *\(-\?[0-9eE.+-]*\).*/\1/p')
-BEST_ENERGY=$(grab  "best engy"          | sed -n 's/.*best engy *\(-\?[0-9eE.+-]*\).*/\1/p')
+INIT_ENERGY=$(grab  "initial energy"          | sed -n 's/.*initial energy:* *\(-\?[0-9eE.+-]*\).*/\1/p')
+FINAL_ENERGY=$(grab "final-state energy"      | sed -n 's/.*: *\(-\?[0-9eE.+-]*\).*/\1/p')
+BEST_ENERGY=$(grab  "best-state.*energy"      | sed -n 's/.*: *\(-\?[0-9eE.+-]*\).*/\1/p')
 
 T_LOAD=$(grab   "Load data:"    | awk '{print $3}')
 T_SETUP=$(grab  "Setup (GPU):"  | awk '{print $3}')
