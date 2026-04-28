@@ -1402,11 +1402,17 @@ void postProcess(const std::vector<int>& quboSolution,
         bool changed = false;
         for (auto& [nm, expr] : sr.expressionConstraints) {
             if (fullAssign.count(nm)) continue;
+            // Walk the polynomial's free variables and look them up in
+            // fullAssign, instead of walking all of fullAssign and trying
+            // to substitute each into the polynomial. polySub1 doesn't
+            // introduce new vars, so the initial freeVars set is an upper
+            // bound and shrinks monotonically as we substitute.
             Poly p = expr;
-            for (auto& [k, v] : fullAssign) {
-                auto it = G_vars.nameToIdx.find(k);
-                if (it != G_vars.nameToIdx.end())
-                    p = polySub1(p, it->second, (int)v);
+            auto fv = freeVars(p);
+            for (int varIdx : fv) {
+                auto fit = fullAssign.find(G_vars.name(varIdx));
+                if (fit != fullAssign.end())
+                    p = polySub1(p, varIdx, (int)fit->second);
             }
             if (freeVars(p).empty()) {
                 fullAssign[nm] = (int64_t)getConst(p);
@@ -1433,11 +1439,17 @@ void postProcess(const std::vector<int>& quboSolution,
     for (int pass = 0; pass < maxPasses; pass++) {
         bool changed = false;
         for (auto& [nm, expr] : sr.expressionConstraints) {
+            // Walk the polynomial's free variables and look them up in
+            // fullAssign, instead of walking all of fullAssign and trying
+            // to substitute each into the polynomial. polySub1 doesn't
+            // introduce new vars, so the initial freeVars set is an upper
+            // bound and shrinks monotonically as we substitute.
             Poly p = expr;
-            for (auto& [k, v] : fullAssign) {
-                auto it = G_vars.nameToIdx.find(k);
-                if (it != G_vars.nameToIdx.end())
-                    p = polySub1(p, it->second, (int)v);
+            auto fv = freeVars(p);
+            for (int varIdx : fv) {
+                auto fit = fullAssign.find(G_vars.name(varIdx));
+                if (fit != fullAssign.end())
+                    p = polySub1(p, varIdx, (int)fit->second);
             }
             if (freeVars(p).empty()) {
                 int64_t resolved = (int64_t)getConst(p);
