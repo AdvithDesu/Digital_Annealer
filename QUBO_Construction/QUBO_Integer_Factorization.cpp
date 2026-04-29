@@ -746,8 +746,22 @@ std::unordered_map<int,Poly> applyRule6(const Poly& clause) {
         else       neg.push_back({m, -c, -1});
     }
 
-    std::sort(pos.begin(), pos.end(), [](auto& a, auto& b){ return a.coeff > b.coeff; });
-    std::sort(neg.begin(), neg.end(), [](auto& a, auto& b){ return a.coeff > b.coeff; });
+    // Sort by coeff DESC, then by canonical monomial name ASC for deterministic
+    // tiebreaking that matches Python's stable-sort over alphabetical iteration.
+    auto monKey = [](const Monomial& m) {
+        std::vector<std::string> ns;
+        for (int v : m) ns.push_back(G_vars.name(v));
+        std::sort(ns.begin(), ns.end());
+        std::string k;
+        for (auto& n : ns) { k += n; k += "*"; }
+        return k;
+    };
+    auto cmpRule6 = [&](const TermInfo& a, const TermInfo& b) {
+        if (a.coeff != b.coeff) return a.coeff > b.coeff;
+        return monKey(a.mon) < monKey(b.mon);
+    };
+    std::sort(pos.begin(), pos.end(), cmpRule6);
+    std::sort(neg.begin(), neg.end(), cmpRule6);
 
     int128_t posSum = 0, negSum = 0;
     for (auto& t : pos) posSum += t.coeff;
@@ -859,16 +873,26 @@ std::unordered_map<int,Poly> applyReplacement(const std::vector<Poly>& clauses) 
     std::unordered_map<int,Poly> res;
     for (auto& clause : clauses) {
         if (isZero(clause)) continue;
+        // Collect eligible degree-1 s_-prefix vars with ±1 coefficient and
+        // iterate them in alphabetical name order for deterministic behavior.
+        std::vector<std::pair<std::string, int>> eligible;  // name -> varIdx
         for (auto& [m, c] : clause) {
             if (m.size() != 1) continue;
-            int idx = m[0];
             if (c != 1 && c != -1) continue;
+            int idx = m[0];
             std::string nm = G_vars.name(idx);
             if (nm.rfind("s_", 0) != 0) continue;
+            eligible.push_back({nm, idx});
+        }
+        std::sort(eligible.begin(), eligible.end());
+        for (auto& [nm, idx] : eligible) {
+            // find c
+            Monomial mvar = {idx};
+            int128_t c = clause.at(mvar);
             // expr = -(clause - c*var) / c
             Poly rest;
             for (auto& [m2, c2] : clause) {
-                if (m2 == m) continue;
+                if (m2 == mvar) continue;
                 rest[m2] = c2;
             }
             // var = -rest / c
@@ -1642,7 +1666,7 @@ int main(int argc, char* argv[]) {
     }
 
     // Parse positional and optional args
-    std::string Narg, spinsFile, csrDir, metaDir, verifyP, verifyQ, traceFile;
+    std::string Narg, spinsFile, csrDir, metaDir, verifyP, verifyQ, traceFile, dumpInitialFile, dumpSimplifiedFile, dumpRawQuboFile, dumpQuadQuboFile;
     for (int i = 1; i < argc; i++) {
         std::string a = argv[i];
         if (a == "--csr-dir" && i + 1 < argc) { csrDir = argv[++i]; continue; }
@@ -1652,6 +1676,10 @@ int main(int argc, char* argv[]) {
         if (a == "--normalize")    { G_normalizeClauses = true;  continue; }
         if (a == "--verify" && i + 2 < argc) { verifyP = argv[++i]; verifyQ = argv[++i]; continue; }
         if (a == "--trace" && i + 1 < argc) { traceFile = argv[++i]; G_trace = true; continue; }
+        if (a == "--dump-initial-clauses" && i + 1 < argc) { dumpInitialFile = argv[++i]; continue; }
+        if (a == "--dump-simplified-clauses" && i + 1 < argc) { dumpSimplifiedFile = argv[++i]; continue; }
+        if (a == "--dump-raw-qubo" && i + 1 < argc) { dumpRawQuboFile = argv[++i]; continue; }
+        if (a == "--dump-quad-qubo" && i + 1 < argc) { dumpQuadQuboFile = argv[++i]; continue; }
         if (Narg.empty()) Narg = a;
         else if (spinsFile.empty()) spinsFile = a;
     }
@@ -1681,6 +1709,17 @@ int main(int argc, char* argv[]) {
     // Keep a copy of original clauses for verification
     std::vector<Poly> originalClauses = clauses;
 
+    // Dump initial column clauses (Checkpoint 1) and exit if requested
+    if (!dumpInitialFile.empty()) {
+        std::ofstream f(dumpInitialFile);
+        if (!f) { std::cerr << "Cannot open dump file: " << dumpInitialFile << "\n"; return 1; }
+        for (size_t i = 0; i < originalClauses.size(); i++) {
+            f << "C" << (i + 1) << ": " << polyStrCanonical(originalClauses[i]) << "\n";
+        }
+        std::cout << "Dumped " << originalClauses.size() << " initial clauses to " << dumpInitialFile << "\n";
+        return 0;
+    }
+
     // Step 3: simplify
     // Squaring cost budget = n_q^3.  This keeps total QUBO vars at O(n^3).
     // For close primes (clauses shrink to near-zero), the budget is never
@@ -1690,6 +1729,68 @@ int main(int argc, char* argv[]) {
     std::cout << "After simplification: " << sr.assignmentConstraints.size()
               << " assignment constraints, "
               << sr.expressionConstraints.size() << " expression constraints\n";
+
+    // Dump simplified clauses + active var set (Checkpoint 3) and exit if requested
+    if (!dumpSimplifiedFile.empty()) {
+        std::ofstream f(dumpSimplifiedFile);
+        if (!f) { std::cerr << "Cannot open dump file: " << dumpSimplifiedFile << "\n"; return 1; }
+        // Collect non-zero clauses, canonicalized
+        std::vector<std::string> canon;
+        std::set<std::string> varSet;
+        for (auto& c : sr.clauses) {
+            if (isZero(c)) continue;
+            canon.push_back(polyStrCanonical(c));
+            for (auto& [m, coef] : c) {
+                for (int v : m) varSet.insert(G_vars.name(v));
+            }
+        }
+        std::sort(canon.begin(), canon.end());
+        f << "# non-zero clauses: " << canon.size() << "\n";
+        f << "# active vars (union of free symbols): " << varSet.size() << "\n";
+        f << "## CLAUSES (sorted)\n";
+        for (auto& s : canon) f << s << "\n";
+        f << "## ACTIVE_VARS (sorted)\n";
+        for (auto& v : varSet) f << v << "\n";
+        std::cout << "Dumped " << canon.size() << " simplified clauses, "
+                  << varSet.size() << " active vars to " << dumpSimplifiedFile << "\n";
+        return 0;
+    }
+
+    // Dump raw squared QUBO (Checkpoint 4a): H = sum_k clause_k^2, integer coeffs,
+    // pre-quadratization, pre-Ising. Canonical output: one term per line, sorted.
+    if (!dumpRawQuboFile.empty()) {
+        std::map<std::vector<std::string>, int128_t> H;  // sorted var-name list -> coeff
+        for (auto& c : sr.clauses) {
+            if (isZero(c)) continue;
+            Poly sq = polyMul(c, c);
+            for (auto& [m, coef] : sq) {
+                std::vector<std::string> names;
+                for (int v : m) names.push_back(G_vars.name(v));
+                std::sort(names.begin(), names.end());
+                H[names] += coef;
+            }
+        }
+        // Drop zeros
+        std::ofstream f(dumpRawQuboFile);
+        if (!f) { std::cerr << "Cannot open dump file: " << dumpRawQuboFile << "\n"; return 1; }
+        int128_t constant = 0;
+        std::vector<std::pair<std::vector<std::string>, int128_t>> nonconst;
+        for (auto& [names, c] : H) {
+            if (c == 0) continue;
+            if (names.empty()) constant = c;
+            else nonconst.push_back({names, c});
+        }
+        f << "# raw squared QUBO terms (excluding constant): " << nonconst.size() << "\n";
+        f << "# constant: " << int128ToString(constant) << "\n";
+        for (auto& [names, c] : nonconst) {
+            f << int128ToString(c);
+            for (auto& n : names) f << "*" << n;
+            f << "\n";
+        }
+        std::cout << "Dumped raw QUBO (" << nonconst.size() << " non-const terms, const="
+                  << int128ToString(constant) << ") to " << dumpRawQuboFile << "\n";
+        return 0;
+    }
 
     // Count non-zero remaining clauses
     int nonZero = 0;
@@ -1710,6 +1811,33 @@ int main(int argc, char* argv[]) {
     double offset = 0.0;
     QUBODict Q = buildQUBO(sr.clauses, offset);
     std::cout << "QUBO has " << Q.size() << " entries (offset=" << offset << ")\n";
+
+    // Dump post-quadratization QUBO (Checkpoint 4b) and exit if requested
+    if (!dumpQuadQuboFile.empty()) {
+        std::ofstream f(dumpQuadQuboFile);
+        if (!f) { std::cerr << "Cannot open dump file: " << dumpQuadQuboFile << "\n"; return 1; }
+        f.precision(16);
+        f << "# offset: " << offset << "\n";
+        // Q is std::map<{i,j} (var indices, i<=j), double>.
+        // Linear terms have i==j; quadratic terms i<j.
+        std::vector<std::tuple<std::string, std::string, double>> rows;
+        for (auto& [key, val] : Q) {
+            if (val == 0.0) continue;
+            std::string a = G_vars.name(key.first);
+            std::string b = G_vars.name(key.second);
+            if (a > b) std::swap(a, b);
+            rows.push_back({a, b, val});
+        }
+        std::sort(rows.begin(), rows.end());
+        f << "# entries: " << rows.size() << "\n";
+        for (auto& [a, b, v] : rows) {
+            if (a == b) f << v << " " << a << "\n";
+            else        f << v << " " << a << " " << b << "\n";
+        }
+        std::cout << "Dumped post-quadratization QUBO (" << rows.size() << " entries, offset="
+                  << offset << ") to " << dumpQuadQuboFile << "\n";
+        return 0;
+    }
 
     // Collect active variables (those appearing in Q)
     std::set<int> activeSet;
