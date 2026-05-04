@@ -655,8 +655,8 @@ def replacement(clauses):
         if clause == 0:
           continue
 
-        # Find variables in the clause
-        variables = list(clause.free_symbols)
+        # Find variables in the clause (alphabetical by name for deterministic iteration)
+        variables = sorted(clause.free_symbols, key=str)
 
         # Try to solve for one variable
         for var in variables:
