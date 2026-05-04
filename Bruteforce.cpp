@@ -14,6 +14,7 @@
 //
 // Build (g++ / MinGW):  g++ -O3 -std=c++17 -pthread -o Bruteforce.exe Bruteforce.cpp
 // Usage:                Bruteforce N P_pred Q_pred [delta_p] [delta_q] [threads]
+//                       Bruteforce -pq P Q P_pred Q_pred [delta_p] [delta_q] [threads]
 
 #include <cstdio>
 #include <cstdint>
@@ -23,6 +24,7 @@
 #include <atomic>
 #include <chrono>
 #include <algorithm>
+#include <cstring>
 
 using u64  = uint64_t;
 using u128 = __uint128_t;
@@ -117,19 +119,47 @@ static u64 search_chunk(u128 N, u64 lo, u64 hi, std::atomic<bool>& stop) {
 }
 
 int main(int argc, char** argv) {
-    if (argc < 4) {
-        fprintf(stderr,
-            "Usage: %s N P_pred Q_pred [delta_p] [delta_q] [threads]\n", argv[0]);
-        return 1;
-    }
+    u128 N;
+    u64  P_pred, Q_pred, delta_p, delta_q;
+    unsigned T;
 
-    u128 N      = parse_u128(argv[1]);
-    u64  P_pred = strtoull(argv[2], nullptr, 10);
-    u64  Q_pred = strtoull(argv[3], nullptr, 10);
-    u64 delta_p = (argc > 4) ? strtoull(argv[4], nullptr, 10) : 1000;
-    u64 delta_q = (argc > 5) ? strtoull(argv[5], nullptr, 10) : 1000;
-    unsigned T  = (argc > 6) ? (unsigned)atoi(argv[6])
+    bool pq_mode = (argc > 1 && strcmp(argv[1], "-pq") == 0);
+
+    if (pq_mode) {
+        // Bruteforce -pq P Q P_pred Q_pred [delta_p] [delta_q] [threads]
+        if (argc < 6) {
+            fprintf(stderr,
+                "Usage: %s -pq P Q P_pred Q_pred [delta_p] [delta_q] [threads]\n", argv[0]);
+            return 1;
+        }
+        u64 P_true = strtoull(argv[2], nullptr, 10);
+        u64 Q_true = strtoull(argv[3], nullptr, 10);
+        N       = (u128)P_true * (u128)Q_true;
+        P_pred  = strtoull(argv[4], nullptr, 10);
+        Q_pred  = strtoull(argv[5], nullptr, 10);
+        delta_p = (argc > 6) ? strtoull(argv[6], nullptr, 10) : 1000;
+        delta_q = (argc > 7) ? strtoull(argv[7], nullptr, 10) : 1000;
+        T       = (argc > 8) ? (unsigned)atoi(argv[8])
                              : std::max(1u, std::thread::hardware_concurrency());
+        char nbuf[48]; print_u128(nbuf, N);
+        fprintf(stderr, "[pq-mode] N = %s\n", nbuf);
+    } else {
+        // Bruteforce N P_pred Q_pred [delta_p] [delta_q] [threads]
+        if (argc < 4) {
+            fprintf(stderr,
+                "Usage: %s N P_pred Q_pred [delta_p] [delta_q] [threads]\n"
+                "       %s -pq P Q P_pred Q_pred [delta_p] [delta_q] [threads]\n",
+                argv[0], argv[0]);
+            return 1;
+        }
+        N       = parse_u128(argv[1]);
+        P_pred  = strtoull(argv[2], nullptr, 10);
+        Q_pred  = strtoull(argv[3], nullptr, 10);
+        delta_p = (argc > 4) ? strtoull(argv[4], nullptr, 10) : 1000;
+        delta_q = (argc > 5) ? strtoull(argv[5], nullptr, 10) : 1000;
+        T       = (argc > 6) ? (unsigned)atoi(argv[6])
+                             : std::max(1u, std::thread::hardware_concurrency());
+    }
 
     auto t_total_start = std::chrono::steady_clock::now();
 
