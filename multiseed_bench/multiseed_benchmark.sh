@@ -10,14 +10,14 @@
 #      to a separate "winner" file; record its energy
 #   5. post-process the winner to get predicted P, Q and verify correctness
 #
-# Outputs (paths relative to repo root):
-#   <out>.csv                            one summary row per bit size
-#   <out>_per_run.csv                    one row per (B, seed)
-#   multiseed_results/spins_<N>_seed<i>  per-run spin states (if -K)
-#   multiseed_results/spins_<N>_best     winning spin state
-#   multiseed_results/best_energy_<N>.txt winning best-energy value
+# Outputs (default location: multiseed_bench/, alongside this script):
+#   multiseed_bench/results.csv               one summary row per bit size
+#   multiseed_bench/results_per_run.csv       one row per (B, seed)
+#   multiseed_bench/spins/spins_<N>_seed<i>   per-run spin states
+#   multiseed_bench/spins/spins_<N>_best      winning spin state
+#   multiseed_bench/spins/best_energy_<N>.txt winning best-energy value
 #
-# Usage: ./multiseed_benchmark.sh [options]
+# Usage: ./multiseed_bench/multiseed_benchmark.sh [options]
 #
 # Options:
 #   -k <K>    independent SA runs per case             (default: 10)
@@ -27,11 +27,18 @@
 #   -m <M>    sweeps per beta                           (default: 10)
 #   -a <F>    target uphill accept rate (-x auto)       (default: 0.5)
 #   -B <list> comma-separated bit sizes                 (default: 8,10,...,62)
-#   -o <name> output prefix (writes <name>.csv etc.)    (default: multiseed_results)
+#   -o <name> output prefix relative to repo root       (default: multiseed_bench/results)
 #   -K        clean per-seed spin files after each B (only keep winner)
 #   -h        show this help
 
 set -u
+
+# ── Locate script + repo root, then operate from repo root so the existing
+#    relative binary paths (./QUBO_Construction/, ./build/) keep working
+#    regardless of where the user invokes this script from.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$REPO_ROOT"
 
 # ── Defaults ─────────────────────────────────────────────────
 NUM_SEEDS=10
@@ -40,20 +47,20 @@ STOP_TEMP=1e-8
 ALPHA=0.95
 SWEEPS=10
 ACCEPT_RATE=0.5
-OUT_PREFIX="multiseed_results"
+OUT_PREFIX="multiseed_bench/results"
 KEEP_PER_SEED_SPINS=true
 
 BITS_LIST=()
 for b in $(seq 8 2 62); do BITS_LIST+=("$b"); done
 
-# ── Binaries / paths ─────────────────────────────────────────
+# ── Binaries / paths (relative to REPO_ROOT, which is the cwd) ───────
 QUBO_BIN="./QUBO_Construction/qubo_factorization"
 SA_BIN="./build/annealer_gpu_SI/annealer_gpu_SI"
 QUBO_SRC="QUBO_Construction/QUBO_Integer_Factorization.cpp"
 CSR_DIR="bin_SI"
 META_DIR="qubo_metadata"
 RESULTS_DIR="results"
-MULTISEED_DIR="multiseed_results"
+MULTISEED_DIR="multiseed_bench/spins"
 
 # ── Parse CLI ────────────────────────────────────────────────
 while getopts ":k:x:y:c:m:a:B:o:Kh" opt; do
