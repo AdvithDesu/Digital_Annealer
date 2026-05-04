@@ -140,11 +140,15 @@ int main(int argc, char** argv) {
                 "Usage: %s -pq P Q P_pred Q_pred [delta_p] [delta_q] [threads]\n", argv[0]);
             return 1;
         }
-        u64 P_true = strtoull(argv[2], nullptr, 10);
-        u64 Q_true = strtoull(argv[3], nullptr, 10);
+        u64 a = strtoull(argv[2], nullptr, 10);
+        u64 b = strtoull(argv[3], nullptr, 10);
+        u64 P_true = (a <= b) ? a : b;
+        u64 Q_true = (a <= b) ? b : a;
         N       = (u128)P_true * (u128)Q_true;
-        P_pred  = strtoull(argv[4], nullptr, 10);
-        Q_pred  = strtoull(argv[5], nullptr, 10);
+        u64 pp = strtoull(argv[4], nullptr, 10);
+        u64 qp = strtoull(argv[5], nullptr, 10);
+        P_pred  = (pp <= qp) ? pp : qp;
+        Q_pred  = (pp <= qp) ? qp : pp;
         delta_p = (argc > 6) ? (u64)strtod(argv[6], nullptr) : 1000;
         delta_q = (argc > 7) ? (u64)strtod(argv[7], nullptr) : 1000;
         T       = (argc > 8) ? (unsigned)atoi(argv[8])
