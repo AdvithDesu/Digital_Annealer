@@ -92,10 +92,18 @@ static Window intersect_windows(u128 N, u64 P_pred, u64 Q_pred,
     u64 lo_p_from_q = sat_u64(N / (u128)hi_q);
     u64 hi_p_from_q = sat_u64(N / (u128)lo_q);
 
+    // Attempt intersection; if empty, fall back to P-side window only.
     Window w;
     w.lo = std::max<u64>(2, std::max(lo_p, lo_p_from_q));
     w.hi = std::min(hi_p, hi_p_from_q);
-    if (w.lo > w.hi) w.hi = (w.lo > 0) ? (w.lo - 1) : 0;  // empty
+    if (w.lo > w.hi) {
+        // Q prediction is inconsistent with P prediction -- ignore Q constraint.
+        w.lo = std::max<u64>(2, lo_p);
+        w.hi = hi_p;
+        fprintf(stderr,
+            "[warn] P-window and Q-window do not intersect -- "
+            "Q prediction ignored, searching P-side window only.\n");
+    }
     return w;
 }
 
@@ -137,8 +145,8 @@ int main(int argc, char** argv) {
         N       = (u128)P_true * (u128)Q_true;
         P_pred  = strtoull(argv[4], nullptr, 10);
         Q_pred  = strtoull(argv[5], nullptr, 10);
-        delta_p = (argc > 6) ? strtoull(argv[6], nullptr, 10) : 1000;
-        delta_q = (argc > 7) ? strtoull(argv[7], nullptr, 10) : 1000;
+        delta_p = (argc > 6) ? (u64)strtod(argv[6], nullptr) : 1000;
+        delta_q = (argc > 7) ? (u64)strtod(argv[7], nullptr) : 1000;
         T       = (argc > 8) ? (unsigned)atoi(argv[8])
                              : std::max(1u, std::thread::hardware_concurrency());
         char nbuf[48]; print_u128(nbuf, N);
@@ -155,22 +163,16 @@ int main(int argc, char** argv) {
         N       = parse_u128(argv[1]);
         P_pred  = strtoull(argv[2], nullptr, 10);
         Q_pred  = strtoull(argv[3], nullptr, 10);
-        delta_p = (argc > 4) ? strtoull(argv[4], nullptr, 10) : 1000;
-        delta_q = (argc > 5) ? strtoull(argv[5], nullptr, 10) : 1000;
+        delta_p = (argc > 4) ? (u64)strtod(argv[4], nullptr) : 1000;
+        delta_q = (argc > 5) ? (u64)strtod(argv[5], nullptr) : 1000;
         T       = (argc > 6) ? (unsigned)atoi(argv[6])
                              : std::max(1u, std::thread::hardware_concurrency());
     }
 
     auto t_total_start = std::chrono::steady_clock::now();
 
-    // (1) Window intersection
+    // (1) Window intersection (falls back to P-side only if Q is inconsistent)
     Window w = intersect_windows(N, P_pred, Q_pred, delta_p, delta_q);
-    if (w.lo > w.hi) {
-        fprintf(stderr,
-            "[abort] P-window and Q-window do not intersect — predictions "
-            "inconsistent with N. Re-anneal.\n");
-        return 2;
-    }
 
     fprintf(stderr,
         "[window] P in [%llu, %llu]  size=%llu  threads=%u\n",
