@@ -1,0 +1,1269 @@
+\documentclass[9pt]{beamer}
+
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{array}
+\usepackage{makecell}
+\usepackage{graphicx}
+\usepackage{fancyhdr}
+\usepackage{svg}
+\usepackage{amsmath}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{physics}
+\usepackage{amssymb}
+\usepackage{float}
+\usepackage{subcaption} % loads the caption package
+
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+
+\usepackage{wrapfig}
+\usepackage{minted}
+\usepackage{xcolor}
+\usepackage{media9}
+\usepackage{multimedia}  % For embedding videos
+% \usepackage[backend=biber,style=numeric]{biblatex} % Adjust style as needed
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    filecolor=magenta,      
+    urlcolor=blue,
+}
+% Theme and customization
+\usetheme{default} % Change this to try different themes
+\usecolortheme{beaver} % Change color scheme as needed
+\setbeamertemplate{navigation symbols}{} % Remove navigation symbols
+
+% Title and author information
+\title{Integer Factorization as an Ising problem}
+% \subtitle{Optional Subtitle}
+\author{Advith Desu}
+\institute{IIT Madras}
+\date{\today}
+
+\begin{document}
+
+% Title slide
+\begin{frame}
+    \titlepage
+\end{frame}
+
+% % Table of contents
+% \begin{frame}{Table of Contents}
+%     \tableofcontents
+% \end{frame}
+
+% Sections% Requires: \usepackage{graphicx}
+
+% \begin{frame}{Simulated Annealing}
+
+%     \begin{figure}[htp]
+%         \centering
+%         \includegraphics[width=0.9\textwidth]{Simulated Annealing Overview.png}
+%         \bigskip
+%         \caption{Simulated Annealing for CPU and GPU.}
+%         \label{fig: Simulated Annealing for CPU and GPU.}
+%     \end{figure}
+    
+% \end{frame}
+
+\begin{frame}{GPU Kernel}
+
+    Digital Annealer 1 (DA1) manually launches kernels by assigning specific threads to do the energy calculations. See \href{https://github.com/AdvithDesu/QAP-using-Simulated-Annealing-optimized-for-GPU}{\text{GitHub Link}} for the code used.
+
+    \bigskip
+
+    \begin{figure}[htp]
+        \centering
+        \includegraphics[width=0.85\textwidth]{GPU Threads.png}
+        \caption{GPU Threads and Thread blocks.}
+        \label{fig: GPU Threads and Thread blocks.}
+    \end{figure}
+    
+\end{frame}
+
+\begin{frame}{GPU Thread Calculation in DA1}
+
+    Each thread $i$ calculates the local field $L_i = \sum_j J_{ij}s_j + h_i$ and the energy difference is then calculated as $-2 \times s_i \times L_i$ depending on which $i^{\text{th}}$ spin flipped.
+
+    \begin{figure}[htp]
+        \centering
+        \includegraphics[width=0.65\textwidth]{Energy calculation in DA1.png}
+        \caption{Energy calculation in DA1.}
+        \label{fig: Energy calculation in DA1.}
+    \end{figure}
+    
+\end{frame}
+
+\begin{frame}{Pseudo-code for Digital Annealer 1 (DA1)}
+
+    \begin{algorithm}[H]
+\caption{Pseudo-code for Digital Annealer 1}
+\begin{algorithmic}[1]
+\Require Initial temperature, number of iterations $iters$, connectivity matrix $J[N][N]$ and magnetic field $h[N]$
+\Ensure Spin configuration $s[N]$
+
+\State \textbf{Initialization:} Randomly initialize spins $s[N]$, $k = 0$
+\State Copy $J[N][N]$ and $h[N]$ to GPU memory
+
+\While{$k \leq iters$}
+    \For{$i = 1 : N$} \Comment{$N$ blocks for $N$-spin model}
+        \For{$j = 1 : N/P$}
+            \State Calculate partial sum of $\Delta H(s_i)$ by computing $J[i][j] \cdot s[j]$
+        \EndFor
+
+        \For{$p = 1 : \log(P)$} \Comment{Using $P$ threads}
+            \State Reduction of partial sum of $\Delta H(s_i)$
+        \EndFor
+
+        \State Calculate $P_B(\Delta H, T)$ for $\Delta H(s_i)$ to determine state of spin $s_i$
+    \EndFor \Comment{For all $N$ spins in ensemble}
+
+    \State Update all possible spins
+\EndWhile
+\State Decrease temperature $T$ linearly
+
+\end{algorithmic}
+\end{algorithm}
+
+    
+\end{frame}
+
+% \begin{frame}[allowframebreaks]{Main differences}
+
+% \begin{itemize}
+%     \item The digital annealer is meant to run a single simulated annealing trajectory, whereas my code is meant for running multiple trajectories at once.
+%     \item This strategy is optimal for finding higher quality solutions as it is equivalent to running 10's of thousands of trajectories and picking the best. Since simulated annealing is a probabilistic algorithm, this gives the GPU a much better chance at finding `good' solutions as one of these thousand runs gets `lucky' and finds a better minima than the average run.
+%     \item This advantage however depends on how many parallel runs I can perform, which would also depend on the problem scale and number of threads I can use. 
+%     \item For example, say my GPU has a 1000 threads and using it to the fullest extent, we are able to perform 10 parallel runs for a given problem. If I then want 15 parallel runs, I would have to wait for my GPU to finish 10 and then do the remaining 5, this is not optimal.
+%     \item Since my kernel launches are abstracted out by CuPy, estimating this optimal number parallel runs becomes tricky (the next section shows an example to estimate this).
+%     \item As the problem scale increases the number of parallel runs I can perform decreases and at very large problem sizes, my algorithm would only be able to do a single run and at this point, the digital annealer and this implementation `should' be doing the exact same thing.
+%     \item 
+% \end{itemize}
+
+% \end{frame}
+
+
+\begin{frame}[allowframebreaks]{Pseudo-code for DA1 with fractional flips}
+
+
+\begin{algorithmic}[1]
+
+\Require Initial temperature, number of iterations $iters$, connectivity matrix $J[N][N]$, magnetic field $h[N]$, flip fraction $\rho$
+\Ensure Spin configuration $s[N]$
+
+\State \textbf{Initialization:} Randomly initialize spins $s[N]$
+\State Copy $J$, $h$, and $s$ to GPU memory
+
+\While{$k \leq iters$}
+
+    \State $A \gets \emptyset$ \Comment{List of Metropolis-accepted spins}
+
+    % ----------- Phase 1: Compute candidates -----------
+    \For{$i = 1 : N$ \textbf{in parallel}} \Comment{$N$ GPU blocks}
+
+        \For{$j = 1 : N/P$} \Comment{$P$ threads per block}
+            \State Compute partial sum of local field contribution:
+            \[
+                S_i \mathrel{+}= J[i][j] \cdot s[j]
+            \]
+        \EndFor
+
+        \For{$p = 1 : \log(P)$} \Comment{Parallel reduction}
+            \State Reduce partial sums to obtain full local field $S_i$
+        \EndFor
+        \State Compute energy change:
+        \[
+            \Delta H_i = -2\, s[i]\,(S_i + h[i])
+        \]
+
+        \State Compute Metropolis probability:
+        \[
+            P_B = \min\{1,\exp(-\Delta H_i/T)\}
+        \]
+
+        \If{random() $< P_B$}
+            \State Append index $i$ to $A$
+        \EndIf
+
+    \EndFor
+    \Comment{None of the spins are flipped}
+
+    % ----------- Phase 2: Exact-k subset selection -----------
+    \State Let $M \gets |A|$ \Comment{Total number accepted}
+
+    \State $k \gets \lceil \rho \cdot M \rceil$ \Comment{Exact number of flips to perform}
+
+    \State Randomly shuffle the list $A$ (Fisher--Yates)
+    \State $A_k \gets$ first $k$ elements of $A$ \Comment{Random subset of size $k$}
+
+    % ----------- Phase 3: Apply selected flips -----------
+    \For{each $i \in A_k$ \textbf{in parallel}}
+        \State Flip spin: $s[i] \gets -s[i]$
+    \EndFor
+
+    \State Update iteration counter: $k \gets k + 1$
+
+\EndWhile
+
+\State Decrease temperature $T$ linearly
+\State \Return $s[N]$
+
+\end{algorithmic}
+
+\end{frame}
+
+%====================================================
+\section{Introduction}
+%====================================================
+
+\begin{frame}{Factorization Problem}
+\begin{itemize}
+\item Given a natural number $N$, find $P,Q$ such that
+\[
+N = P Q
+\]
+\item Hard inverse problem underlying RSA security.
+\item Idea: map factorization $\rightarrow$ optimization problem.
+\item Solve using annealing-based techniques.
+\end{itemize}
+\end{frame}
+
+%====================================================
+\section{Formulation}
+%====================================================
+
+\begin{frame}{Binary Representation and Assumptions}
+Assumptions:
+\begin{itemize}
+\item $N$ is odd.
+\item Factors have equal bit-length
+\[
+n=\left\lceil \tfrac12 \log_2 N \right\rceil.
+\]
+\end{itemize}
+
+Binary form:
+\[
+P=\sum_{k=0}^{n-1}2^k p_k,\quad
+Q=\sum_{k=0}^{n-1}2^k q_k,\quad p_k,q_k\in\{0,1\}.
+\]
+
+Fixed bits:
+\[
+p_0=q_0=1,\qquad p_{n-1}=q_{n-1}=1.
+\]
+\end{frame}
+
+\begin{frame}{Column-wise Multiplication}
+\begin{itemize}
+\item Construct binary long multiplication table.
+\item Introduce carry variables $s_{i,j}$.
+\item Each column gives a constraint:
+\[
+C_i = N_i - \sum_{j} q_j p_{i-j}
+      - \sum s_{j,i}
+      + \sum 2^j s_{i,i+j}.
+\]
+\item Correct factors satisfy $C_i = 0$.
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Energy Function}
+Optimization objective:
+\[
+\min_{\{p_i,q_i,s_{ij}\}} \sum_i (C_i)^2.
+\]
+
+\begin{itemize}
+\item Binary variables: factor bits + carry bits.
+\item Ground state corresponds to valid factorization.
+\item Alternative direct method:
+\[
+\left(N-\sum p_i2^i \sum q_j2^j\right)^2
+\]
+but gives fewer preprocessing opportunities.
+\end{itemize}
+\end{frame}
+
+%====================================================
+\section{Classical Pre-processing}
+%====================================================
+
+\begin{frame}{Core Reduction Rules}
+For binary variables $x_i\in\{0,1\}$:
+
+\textbf{Sum rules}
+\[
+\sum_i x_i=n \Rightarrow x_i=1,\qquad
+\sum_i x_i=0 \Rightarrow x_i=0.
+\]
+
+\textbf{Complement rule}
+\[
+x_1+x_2=1 \Rightarrow x_2=1-x_1.
+\]
+
+\textbf{Power rule}
+\[
+x^m=x,\quad m\ge2.
+\]
+\end{frame}
+
+\begin{frame}{Coefficient and Parity Rules}
+General linear constraint:
+\[
+\sum_i c_i x_i + C = 0.
+\]
+
+Let
+\[
+S_+=\sum_{c_i>0}c_i,\quad S_-=\sum_{c_j<0}|c_j|.
+\]
+
+\begin{itemize}
+\item Large coefficients can force $x_i=0$ or $1$.
+\item Parity constraints:
+\begin{align*}
+x_1+x_2+\text{even} &= \text{even} \Rightarrow x_1=x_2,\\
+x_1+x_2+\text{even} &= \text{odd} \Rightarrow x_1+x_2=1.
+\end{align*}
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Example: $N=15$ Reduction}
+Initial clauses (example):
+\begin{align*}
+C_1 &: -p_1-q_1+2s_{1,2}+1=0,\\
+C_2 &: -p_1q_1-p_2-q_2-s_{1,2}+2s_{2,3}+4s_{2,4}+1=0.
+\end{align*}
+
+Applying rules:
+\begin{itemize}
+\item Fix carries $s_{1,2}=s_{2,4}=0$.
+\item Complement relation: $q_1=1-p_1$.
+\item Power rule: $p_1^2=p_1$.
+\end{itemize}
+
+Final reduced constraint:
+\[
+2p_1p_2-p_1-p_2+1=0
+\Rightarrow p_1+p_2=1.
+\]
+\end{frame}
+
+
+% \begin{frame}{Integer factorization}
+
+%     \begin{itemize}
+%         \item This \href{https://colab.research.google.com/drive/1V4Wkyoscq7FajM6ScB4RikPWL6Yf76U3?usp=sharing}{Colab Notebook} contains the original code by Aryan that constructs a QUBO matrix ($Q$) for a given Integer along with the appropriate transformation of the QUBO problem into an Ising problem i.e. $Q$ is converted into a $J_{ij}$ matrix and the $h$ vector that are used by DA1.
+%         \item The graph in Fig. \ref{fig: bqm variable vs time taken for DA1.} shows the time taken to arrive at the solution using DA1 using the integers in Table \ref{tab: BQM Results with Exponential Temperature Schedule}.
+%         \item Here the number of BQM variable is just the number of `spins' in the Ising problem we are solving using DA1.
+%         \item DA1 still (after exponential temperature scheduling and lower initial temperatures) does not seem to consistently converge to the solution for integers with number of BQM variables beyond 400.
+        
+
+%     \end{itemize}
+    
+% \end{frame}
+
+% \begin{frame}{Time to solution (Integer factorization on DA1)}
+
+%     \begin{figure}[htp]
+%         \centering
+%         \includegraphics[width=\textwidth]{bqm variable vs time taken for DA1.png}
+%         \caption{Time to solution for the integer factorization problem on DA1 (100\% flips).}
+%         \label{fig: bqm variable vs time taken for DA1.}
+%     \end{figure}
+    
+% \end{frame}
+
+% \begin{frame}{The parameters in DA1 for Integer factorization.}
+
+% \begin{itemize}
+%     \item One \textbf{Iteration} is the process of calculating the energy difference (and subsequently the Metropolis-Hasting condition) for all spins in the ensemble at a fixed Temperature (T). Followed by all required flips (100\% case).
+%     \item \textbf{Cooling Rate ($\alpha$)} is the rate at which the Temperature is decreased ($T_{i + 1} = \alpha T_i$). Updates to T are done after `$max\_iter$' number of iterations (or when the early stopping condition is reached). For the results in Table \ref{tab: BQM Results with Exponential Temperature Schedule}, I have used $\alpha = 0.9$.
+%     \item \textit{\textbf{max\_iter}} is a predefined variable that sets the maximum number of iterations the algorithm performs at a given T.
+%     \item We also stop iterating if the total energy difference after between two iterations is less than \textbf{1.0} and if this happens continuously for \textbf{5\%} of $max\_iter$ number of iterations.
+%     \item We choose 1.0 as our minimum energy difference check as all the values in the $J_{ij}$ and $h_i$ matrices are purely integers, resulting in energy values also being integers.
+% \end{itemize}
+% \end{frame}
+
+% \begin{frame}{Determining Initial Temperature}
+
+% \begin{itemize}
+%     \item The initial temperature varies for different integers that we look to factorize. For a given $J_{ij}$ and $h_i$, we start by taking a random spin configuration, then flip each individual spin one by one and keep track of the all the energy difference ($\Delta E$) values.
+%     \item We then take the average of all the positive $\Delta E$ as only these are considered for the Metropolis condition (negative $\Delta E$ skip the condition and are directly accepted as per the algorithm).
+%     \item This process is repeated for different random configurations (say a 1000) to arrive at a final $\Delta E_{\text{avg}}$ value.
+%     \item $\Delta E_{\text{avg}}$ then gives us a good idea as to what initial temperature to use.
+%     \item For example, take the number $159197$. The resulting QUBO has 379 variables and $\Delta E_{\text{avg}}$ comes out to be around 85,000. Since we would like to allow the system to accept most spin configurations at high temperatures, we set our initial temperature using this value.
+%     \item The final temperature is fixed at \textbf{0.1}.
+% \end{itemize}
+% \end{frame}+
+
+% \begin{frame}{BQM Results with Exponential Temperature Schedule}
+% \centering
+% \scriptsize
+
+% \resizebox{0.95\textwidth}{!}{%
+% \begin{tabular}{ccccccc}
+% \toprule
+% \makecell{\textbf{BQM}\\\textbf{Variables}} &
+% \makecell{\textbf{Integer}} &
+% \makecell{\textbf{Ground State}\\\textbf{Energy}} &
+% \makecell{\textbf{Average}\\\textbf{$\Delta E$}} &
+% \makecell{\textbf{Max}\\\textbf{Iterations}} &
+% \makecell{\textbf{Time}\\\textbf{(s)}} &
+% \makecell{\textbf{Solutions}\\\textbf{(/100)}} \\
+% \midrule
+% \multirow{2}{*}{41}  & \multirow{2}{*}{10403}  & \multirow{2}{*}{-23874} & \multirow{2}{*}{1913} & 10   & 0.08 & 46 \\
+%                      &                          &                         &                      & 100  & 0.83 & 42 \\
+% \midrule
+% \multirow{2}{*}{87}  & \multirow{2}{*}{24613}  & \multirow{2}{*}{-186575} & \multirow{2}{*}{8400} & 10   &  0.17 & 32  \\
+%                      &                          &                          &                      & 100  &  1.78 & 37 \\
+% \midrule
+% \multirow{2}{*}{147} & \multirow{2}{*}{47053}  & \multirow{2}{*}{-469304} & \multirow{2}{*}{9025} & 10   &  0.3 & 10  \\
+%                      &                          &                          &                      & 100  &  2.95 & 10  \\
+% \midrule
+% \multirow{2}{*}{162} & \multirow{2}{*}{39203}  & \multirow{2}{*}{-438184} & \multirow{2}{*}{9638} & 10   & 0.32 & 11  \\
+%                      &                          &                          &                      & 100  &  3.15 & 8  \\
+% \midrule
+% \multirow{2}{*}{243} & \multirow{2}{*}{51067}  & \multirow{2}{*}{-2380111}& \multirow{2}{*}{24886} & 10   & 0.51 & 28  \\
+%                      &                          &                          &                       & 100  &  5.14 & 36  \\
+% \midrule
+% \multirow{2}{*}{379} & \multirow{2}{*}{159197} & \multirow{2}{*}{-6349159}& \multirow{2}{*}{84385} & 10   &  1.02 & 1  \\
+%                      &                          &                          &                       & 100  &  10.31 & 0  \\
+% \bottomrule
+% \end{tabular}%
+% }
+% \label{tab: BQM Results with Exponential Temperature Schedule}
+% \end{frame}
+
+% \begin{frame}{BQM Results with Linear Temperature Schedule}
+% \centering
+% \scriptsize
+
+% \resizebox{0.9\textwidth}{!}{%
+% \begin{tabular}{cccccc}
+% \toprule
+% \makecell{\textbf{BQM}\\\textbf{Variables}} &
+% \makecell{\textbf{Integer}} &
+% \makecell{\textbf{Ground State}\\\textbf{Energy}} &
+% \makecell{\textbf{Max}\\\textbf{Iterations}} &
+% \makecell{\textbf{Time}\\\textbf{(s)}} &
+% \makecell{\textbf{Solutions}\\\textbf{(/100)}} \\
+% \midrule
+% \multirow{3}{*}{41}  & \multirow{3}{*}{10403}  & \multirow{3}{*}{-23874}   & 10   & 0.051 & 16 \\
+%                      &                          &                            & 100  & 0.509 & 24 \\
+%                      &                          &                            & 1000 & 4.99  & 31 \\
+% \midrule
+% \multirow{3}{*}{87}  & \multirow{3}{*}{24613}  & \multirow{3}{*}{-186575}  & 10   & 0.10  & 9  \\
+%                      &                          &                            & 100  & 0.98  & 14 \\
+%                      &                          &                            & 1000 & 9.69  & 25 \\
+% \midrule
+% \multirow{3}{*}{147} & \multirow{3}{*}{47053}  & \multirow{3}{*}{-469304}  & 10   & 0.16  & 4  \\
+%                      &                          &                            & 100  & 1.56  & 9  \\
+%                      &                          &                            & 1000 & 15.99 & 9  \\
+% \midrule
+% \multirow{3}{*}{162} & \multirow{3}{*}{39203}  & \multirow{3}{*}{-438184}  & 10   & 0.169 & 1  \\
+%                      &                          &                            & 100  & 1.70  & 6  \\
+%                      &                          &                            & 1000 & 17.58 & 11 \\
+% \midrule
+% \multirow{3}{*}{243} & \multirow{3}{*}{51067}  & \multirow{3}{*}{-2380111} & 10   & 0.254 & 2  \\
+%                      &                          &                            & 100  & 2.52  & 6  \\
+%                      &                          &                            & 1000 & 25.35 & 6  \\
+% \midrule
+% \multirow{3}{*}{379} & \multirow{3}{*}{159197} & \multirow{3}{*}{-6349159} & 10   & 0.39  & 0  \\
+%                      &                          &                            & 100  & 3.75  & 0  \\
+%                      &                          &                            & 1000 & 37.73 & 1  \\
+% \bottomrule
+% \end{tabular}%
+% }
+% \end{frame}
+
+% \begin{frame}{BQM variables vs Average $\Delta E$}
+
+%     \begin{figure}[htp]
+%         \centering
+%         \includegraphics[width=0.8\textwidth]{BQM variables vs Average delta E.png}
+%         \caption{Number of BQM variables versus the average $\Delta E$ value (Used to determine initial temperature of the simulated annealing algorithm).}
+%         \label{fig: Number of BQM variables versus the average delta E
+%         value.}
+%     \end{figure}
+    
+% \end{frame}
+
+
+% \begin{frame}{Energy Vs Temperature}
+
+%     \begin{figure}[htp]
+%         \centering
+%         \includegraphics[width=0.9\textwidth]{Energy vs Temperature for different cooling rates DA1.png}
+%         \caption{Energy vs Temperature for different cooling rates when factorizing the integer 159197 (379 variables).}
+%         \label{fig: Energy vs Temperature for different cooling rates DA1.}
+%     \end{figure}
+    
+% \end{frame}
+
+\begin{frame}[allowframebreaks]{J matrix Visualization}
+
+    \begin{figure}[htp]
+        \centering
+        \includegraphics[width=0.62\textwidth]{Sparsity of J matrix for 162 BQM.png}
+        \caption{Sparsity of J matrix for 162 BQM  (Integer 39203).}
+        \label{fig: Sparsity of J matrix for 162 BQM (Integer 39203).}
+    \end{figure}
+
+    \begin{figure}[htp]
+        \centering
+        \includegraphics[width=0.62\textwidth]{Sparsity of J matrix for 379 BQM.png}
+        \caption{Sparsity of J matrix for 379 BQM (Integer 159197).}
+        \label{fig: Sparsity of J matrix for 379 BQM (Integer 159197).}
+    \end{figure}
+
+    % \begin{figure}[htp]
+    %     \centering
+    %     \includegraphics[width=0.62\textwidth]{Sparsity of J matrix for 563 BQM.png}
+    %     \caption{Sparsity of J matrix for 563 BQM (Integer 338699).}
+    %     \label{fig: Sparsity of J matrix for 563 BQM (Integer 338699).}
+    % \end{figure}
+
+    % \begin{figure}[htp]
+    %     \centering
+    %     \includegraphics[width=0.62\textwidth]{Sparsity of J matrix for 902 BQM.png}
+    %     \caption{Sparsity of J matrix for 902 BQM (Integer 377977).}
+    %     \label{fig: Sparsity of J matrix for 902 BQM (Integer 377977).}
+    % \end{figure}
+    
+\end{frame}
+
+\begin{frame}{Sparse Coupling Matrix Representation (CSR)}
+
+\textbf{Problem:}
+The Ising coupling matrix $J_{ij}$ is very large but mostly zero.
+Storing it as a dense $N \times N$ matrix wastes memory and bandwidth.
+
+\vspace{0.3cm}
+\textbf{Key idea:}
+Store \emph{only the nonzero couplings} using
+\alert{Compressed Sparse Row (CSR)} format. CSR represents a sparse matrix using three arrays:
+
+\[
+\texttt{row\_ptr}[i] \quad \text{start index of row } i
+\]
+\[
+\texttt{col\_idx}[k] \quad \text{column index of nonzero entry}
+\]
+\[
+\texttt{values}[k] \quad \text{value of } J_{ij}
+\]
+
+Only nonzero entries are stored.
+
+\vspace{0.2cm}
+\textbf{Memory cost:} $\mathcal{O}(N + \text{nnz})$ instead of $\mathcal{O}(N^2)$
+
+\end{frame}
+
+
+% \begin{frame}{Small Example}
+
+% Given the Ising matrix:
+% \[
+% J =
+% \begin{bmatrix}
+% 0 & 1.2 & 0 & 0 \\
+% 1.2 & 0 & -0.5 & 0 \\
+% 0 & -0.5 & 0 & 0.8 \\
+% 0 & 0 & 0.8 & 0
+% \end{bmatrix}
+% \]
+
+% Nonzero couplings:
+% \[
+% (0,1),(1,0),(1,2),(2,1),(2,3),(3,2)
+% \]
+
+% CSR representation:
+
+% \[
+% \texttt{row\_ptr} = [0,\;1,\;3,\;5,\;6]
+% \]
+
+% \[
+% \texttt{col\_idx} = [1,\;0,\;2,\;1,\;3,\;2]
+% \]
+
+% \[
+% \texttt{values} = [1.2,\;1.2,\;-0.5,\;-0.5,\;0.8,\;0.8]
+% \]
+
+% \vspace{0.2cm}
+% Row $i$ corresponds to indices:
+% \[
+% k \in [\texttt{row\_ptr}[i],\; \texttt{row\_ptr}[i+1])
+% \]
+
+% \end{frame}
+
+
+
+% \begin{frame}{Why CSR is GPU-Friendly for Simulated Annealing}
+
+% For a single spin flip, simulated annealing computes:
+% \[
+% \Delta E_i = 2 s_i \left( h_i + \sum_{j} J_{ij} s_j \right)
+% \]
+
+% \vspace{0.2cm}
+% Using CSR, the sum becomes:
+% \[
+% \sum_{k=\texttt{row\_ptr}[i]}^{\texttt{row\_ptr}[i+1]-1}
+% \texttt{values}[k]\; s_{\texttt{col\_idx}[k]}
+% \]
+
+% \vspace{0.2cm}
+% \textbf{Benefits on GPU:}
+% \begin{itemize}
+% \item Each thread reads only true neighbors
+% \item No wasted reads of zero entries
+% \item Coalesced memory access
+% \item Perfect match for one-thread-per-spin kernels
+% \end{itemize}
+
+% \end{frame}
+
+% \begin{frame}{Memory Complexity: Dense vs CSR Representation}
+
+% \textbf{Definition:}  
+% \alert{nnz} = number of nonzero entries in the coupling matrix $J_{ij}$
+% (i.e., number of edges in the interaction graph, counting both $i\!\to\!j$ and $j\!\to\!i$).
+
+% \vspace{0.3cm}
+% \textbf{Dense representation (previous approach):}
+% \[
+% \underbrace{J \in \mathbb{R}^{N \times N}}_{\text{dense}}
+% \quad+\quad
+% \underbrace{h \in \mathbb{R}^{N}}_{\text{linear terms}}
+% \]
+
+% \[
+% \text{Memory} = \mathcal{O}(N^2) \;\; \text{floats}
+% \]
+
+% \vspace{0.4cm}
+% \textbf{CSR representation (new approach):}
+% \[
+% \underbrace{\texttt{row\_ptr} \in \mathbb{Z}^{N+1}}_{\text{row offsets}}
+% \quad+\quad
+% \underbrace{\texttt{col\_idx} \in \mathbb{Z}^{\text{nnz}}}_{\text{neighbors}}
+% \quad+\quad
+% \underbrace{\texttt{values} \in \mathbb{R}^{\text{nnz}}}_{J_{ij}}
+% \quad+\quad
+% \underbrace{h \in \mathbb{R}^{N}}_{\text{linear terms}}
+% \]
+
+% \[
+% \text{Memory} = \mathcal{O}(N + \text{nnz})
+% \]
+
+% \vspace{0.3cm}  
+% For sparse problems, $\text{nnz} \ll N^2$, yielding orders-of-magnitude
+% reductions in memory and GPU bandwidth usage.
+
+% \end{frame}
+
+
+% \begin{frame}{Current Issues and Upcoming work}
+
+%     \begin{itemize}
+%         \item The number of solutions found in 100 runs for all the numbers has improved by around 2 times compared to the linear temperature schedule with very high initial temperatures.
+%         \item However, integer factorization done this way requires us to find the exact ground state energy as all other configurations result in the wrong prime factors. 
+%         \item Since we are looking for the exact ground state energy, DA1 seems to converge to the exact solution fewer and fewer times for large problems.
+%         \item Storing and generating J matrices for bigger problems sizes becomes unfeasible very quickly. Currently the Colab code runs into RAM issues over 4000 BQM variables.
+%         \item Looking at the sparsity of the resulting J matrices, I have modified to use a compressed sparse row representation (CSR) for the J matrix. Working on changing the digital annealer code to fit this representation as the current CUDA code is built for a regular matrix representation.
+%     \end{itemize}
+    
+% \end{frame}
+
+% \begin{frame}{Time taken for DWave and DA1 for Integer Factorization}
+
+%     \begin{figure}[htp]
+%         \centering
+%         \includegraphics[width=0.9\textwidth]{bqm variables vs time taken for DA1 and Dwave.png}
+%         \caption{bqm variables vs time taken for DA1 and Dwave.}
+%         \label{fig: bqm variables vs time taken for DA1 and Dwave.}
+%     \end{figure}
+    
+% \end{frame}
+
+% \begin{frame}{Results: Final Energies (w.r.t Ground State Energies)}
+% \centering
+% \small
+
+% \begin{tabular}{c c c c c}
+% \toprule
+% \textbf{No. of BQM} &
+% \textbf{Integer} &
+% \textbf{Ground Energy} &
+% \textbf{QPU (\%)} &
+% \textbf{Hybrid (\%)} \\
+% \midrule
+% 87  & 24613  & -217156   & 1.0000     & 1.0000 \\
+% 162 & 39203  & -485809   & 0.9698     & 1.0000 \\
+% 243 & 51067  & -4289041  & 0.9795     & 1.0000 \\
+% 376 & 159179 & -7214596  & 0.9497     & 0.9999988 \\
+% 563 & 338699 & -19360000 & 0.8612     & 1.0000 \\
+% 776 & 104927 & --        & --         & -- \\
+% \bottomrule
+% \end{tabular}
+
+% \end{frame}
+
+% \begin{frame}{Results: Raw Final Energies}
+% \centering
+% \small
+
+% \begin{tabular}{c c c c c}
+% \toprule
+% \textbf{No. of BQM} &
+% \textbf{Integer} &
+% \textbf{QPU Energy} &
+% \textbf{Hybrid Energy} &
+% \textbf{Ground Energy} \\
+% \midrule
+% 87  & 24613  & -217156   & -217156   & -217156 \\
+% 162 & 39203  & -471132   & -485809   & -485809 \\
+% 243 & 51067  & -420229   & -4289041  & -4289041 \\
+% 376 & 159179 & -6851587  & -7214587  & -7214596 \\
+% 563 & 338699 & -16673191 & -19360000 & -19360000 \\
+% 776 & 104927 & --        & -21780880 & -- \\
+% \bottomrule
+% \end{tabular}
+
+% \end{frame}
+
+% \begin{frame}{Performance Comparison of DA1 with CSR representation}
+% \centering
+% % \small
+% \renewcommand{\arraystretch}{1.3} % <-- increases row spacing
+% \begin{tabular}{|c|c|c|c|}
+% \hline
+% \textbf{No. of BQM} & \textbf{Integer} & \textbf{Time Taken} & \textbf{Time Taken} \\
+% \textbf{variables} & ($N$) & \textbf{CSR DA1 (s)} & \textbf{DA1 (s)} \\
+% \hline
+% 87   & 24613   & 0.123 & 0.127 \\
+% 162  & 39203   & 0.245 & 0.248 \\
+% 243  & 51067   & 0.382 & 0.382 \\
+% 376  & 159179  & 0.674 & 0.675 \\
+% 563  & 338699  & 1.126 & 1.124 \\
+% 776  & 104927  & 1.536 & 1.543 \\
+% 902  & 377977  & 1.925 & 1.913 \\
+% 1113 & 525851  & 2.518 & 2.495 \\
+% 1977 & 1913771 & 4.594 & 7.771 \\
+% \hline
+% \end{tabular}
+% \end{frame}
+
+% \begin{frame}{Annealing Parameters Across BQM Sizes}
+% \centering
+% \renewcommand{\arraystretch}{1.3}
+% \setlength{\tabcolsep}{8pt}
+
+% \begin{tabular}{|c|c|c|c|c|}
+% \hline
+% \textbf{No. of BQM} & \textbf{Integer} & \textbf{Initial} & \textbf{Final} & \textbf{Cooling} \\
+% \textbf{variables} &  & \textbf{Temperature} & \textbf{Temperature} & \textbf{Rate} \\
+% \hline
+% 87   & 24613   & $1.00\times10^{4}$ & 0.01 & 0.75 \\
+% 162  & 39203   & $5.00\times10^{4}$ & 0.01 & 0.75 \\
+% 243  & 51067   & $1.00\times10^{5}$ & 0.01 & 0.75 \\
+% 376  & 159179  & $1.00\times10^{6}$ & 0.01 & 0.75 \\
+% 563  & 338699  & $1.00\times10^{7}$ & 0.01 & 0.75 \\
+% 776  & 104927  & $1.00\times10^{7}$ & 0.01 & 0.75 \\
+% 902  & 377977  & $5.00\times10^{7}$ & 0.01 & 0.75 \\
+% 1113 & 525851  & $5.00\times10^{7}$ & 0.01 & 0.75 \\
+% 1977 & 1913771 & $5.00\times10^{8}$ & 0.01 & 0.75 \\
+% \hline
+% \end{tabular}
+% \end{frame}
+
+% \begin{frame}{Average Energy Percentage: CSR vs DA1}
+% \centering
+% \small
+% \renewcommand{\arraystretch}{1.3}
+% \setlength{\tabcolsep}{10pt}
+
+% \begin{tabular}{|c|c|c|c|}
+% \hline
+% \textbf{No. of BQM} & \textbf{Integer} &
+% \textbf{Average energy} & \textbf{Average energy} \\
+% \textbf{variables} &  &
+% \textbf{percentage (CSR)} &
+% \textbf{percentage (DA1)} \\
+% \hline
+% 87   & 24613   & 0.998920970119254 & 0.998975610037984 \\
+% 162  & 39203   & 0.992020518789870 & 0.991894123346030 \\
+% 243  & 51067   & 0.997493007679053 & 0.997995350422810 \\
+% 376  & 159179  & 0.997490982664003 & 0.998725291018857 \\
+% 563  & 338699  & 0.997726690914965 & 0.997116767329878 \\
+% 776  & 104927  & -- & -- \\
+% 902  & 377977  & -- & -- \\
+% 1113 & 525851  & -- & -- \\
+% 1977 & 1913771 & -- & -- \\
+% \hline
+% \end{tabular}
+% \end{frame}
+
+\begin{frame}{Time Taken for J construction and CSR DA1}
+
+    \begin{figure}[htp]
+        \centering
+        \includegraphics[width=0.9\textwidth]{bqm variables vs time taken for J construction and DA1.png}
+        \caption{BQM variables vs time taken for J construction and DA1.}
+        \label{fig: bqm variables vs time taken for J construction and DA1.}
+    \end{figure}
+    
+\end{frame}
+
+
+%========================================
+
+\begin{frame}{BQM Results (Part 1)}
+\centering
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{rrrrrr}
+\hline
+No. BQM & Integer & P (actual) & Q (actual) & p (pred) & q (pred) \\
+\hline
+87    & 24613        & 151   & 163   & 143   & 171 \\
+162   & 39203        & 197   & 199   & 189   & 191 \\
+243   & 51067        & 223   & 229   & 219   & 241 \\
+376   & 159197       & 397   & 401   & 387   & 415 \\
+563   & 338699       & 577   & 587   & 515   & 665 \\
+776   & 104927       & 317   & 331   & 301   & 343 \\
+902   & 377977       & 547   & 691   & 513   & 737 \\
+1113  & 525851       & 691   & 761   & 661   & 781 \\
+1977  & 1913771      & 1301  & 1471  & 1233  & 1519 \\
+3447  & 6768529      & 2351  & 2879  & 2063  & 3371 \\
+\hline
+\end{tabular}
+\end{frame}
+
+\begin{frame}{BQM Results (Part 2)}
+\centering
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{rrrrrr}
+\hline
+No. BQM & Integer & P (actual) & Q (actual) & p (pred) & q (pred) \\
+\hline
+4322  & 23282377      & 4637    & 5021    & 4443    & 5115 \\
+9352  & 130047817     & 10831   & 12007   & 10241   & 12265 \\
+11738 & 436820639     & 17749   & 24611   & 16387   & 26621 \\
+16057 & 3581495767    & 52009   & 68863   & 64717   & 64851 \\
+24536 & 27145947923   & 148061  & 183343  & 155651  & 184977 \\
+28127 & 90172671887   & 288803  & 312229  & 268295  & 323577 \\
+39602 & 364953757313  & 591113  & 617401  & 560129  & 654729 \\
+57512 & 2455515638143 & 1348271 & 1821233 & 1101247 & 1833977 \\
+76952 & 11875502333273 & 3200003 & 3711091 & 3508227 & 3678211 \\
+\hline
+\end{tabular}
+\end{frame}
+
+\begin{frame}{Percentage Difference of Predicted and Actual Prime Factors}
+
+    \begin{figure}[htp]
+        \centering
+        \includegraphics[width=0.9\textwidth]{Bar graph of percentage difference of predicted primes and actual primes.png}
+        \caption{Bar graph of percentage difference of predicted primes and actual primes.}
+        \label{fig: Bar graph of percentage difference of predicted primes and actual primes.}
+    \end{figure}
+    
+\end{frame}
+
+\begin{frame}{Number of Densely connected spins with scale}
+
+    \begin{figure}[htp]
+        \centering
+        \includegraphics[width=0.9\textwidth]{bqm variables vs number of densely connected spins.png}
+        \caption{BQM variables vs number of densely connected spins.}
+        \label{fig: bqm variables vs number of densely connected spins.}
+    \end{figure}
+    
+\end{frame}
+
+\begin{frame}{Number of Non-zero values in J matrix with scale}
+
+    \begin{figure}[htp]
+        \centering
+        \includegraphics[width=0.9\textwidth]{bqm variables vs number of non zero values in J.png}
+        \caption{BQM variables vs number of non zero values in $J_{ij}$.}
+        \label{fig: bqm variables vs number of non zero values in J.}
+    \end{figure}
+    
+\end{frame}
+
+\begin{frame}{Energy and Average Energy difference with scale}
+
+    \begin{figure}[htp]
+        \centering
+        \includegraphics[width=0.9\textwidth]{bqm variables vs absolute energy value and average delta E vales.png}
+        \caption{BQM variables vs absolute energy value and average $\delta E$ values.}
+        \label{fig: bqm variables vs absolute energy value and average delta E values.}
+    \end{figure}
+    
+\end{frame}
+
+\begin{frame}{Trend-lines}
+
+\[
+\text{Number of BQM variables (bqm)} \leq ( \left\lceil log_2{N} \right\rceil )^3
+\]
+
+\[
+\text{Number of non-zero } J_{ij} \text{ elements (nnz)} = 6.08 \times \text{bqm} + 680
+\]
+
+\[
+\text{time} (s) = 4.22 \times10^{-3} \times \text{bqm}
+\]
+
+\bigskip
+
+\begin{itemize}
+
+\item For a 128 bit number (N), it would have approximately 2 million bqm variables, 194 MB to store $J_{ij}$ and would take 2.5 hrs to run on DA1.
+
+\item For a 256 bit number (N), it would have approximately 17 million bqm variables, 1.5 GB to store $J_{ij}$ and would take 19.66 hrs to run on DA1
+
+\end{itemize}
+\end{frame}
+
+
+\begin{frame}{Annealing Parameters}
+
+    \begin{itemize}
+        \setlength\itemsep{1em}
+        \item \textbf{Initial temperature:} 1000
+        \item \textbf{Final temperature:} 0.1
+        \item \textbf{Cooling rate:} 0.99
+        \item \textbf{Sweeps per temperature:} 10
+    \end{itemize}
+
+\end{frame}
+
+\begin{frame}{Annealing Time per Iteration vs Number of Spins}
+
+    \begin{figure}
+        \centering
+        \includegraphics[width=0.9\linewidth]{spins_vs_time_per_iteration_for_mac_gh200.png}
+    \end{figure}
+
+\end{frame}
+
+\begin{frame}{Construction time for CSR J}
+
+    \begin{figure}
+        \centering
+        \includegraphics[width=\linewidth]{csr_construction_python_vs_cpp.png}
+    \end{figure}
+
+\end{frame}
+
+\begin{frame}{Execution Time Comparison}
+
+    \begin{figure}
+        \centering
+        \includegraphics[width=\linewidth]{Execution Time for graph coloring SA.png}
+    \end{figure}
+
+\end{frame}
+
+\begin{frame}{Solution Quality from Graph-Colored Simulated Annealing}
+
+    \begin{figure}
+        \centering
+        \includegraphics[width=1\linewidth]{percentage_difference_predicted_factors.png}
+    \end{figure}
+
+\end{frame}
+
+\begin{frame}{Solution Quality Measured by Gap between Real and Estimated P}
+
+    \begin{figure}
+        \centering
+        \includegraphics[width=1\linewidth]{Percentage Gap between real and estimated P.png}
+    \end{figure}
+
+    \begin{enumerate}
+        \item Average (\%) difference with square root N as the estimate = \textbf{10.33\%}
+        \item Average (\%) difference with $P_{\text{pred}}$ from Simulated Annealing = \textbf{4.23\%}
+        \item Average (\%) difference with mean of $P_{\text{pred}}$ and $N / Q_{\text{pred}}$ = \textbf{2.98\%}
+    \end{enumerate}
+
+\end{frame}
+
+\begin{frame}{Time Taken to Find Exact primes by Brute Force}
+
+    \begin{figure}
+        \centering
+        \includegraphics[width=1\linewidth]{Raw gap vs Time taken to find solution.png}
+    \end{figure}
+
+    $$\text{Time Taken (s)} = \frac{3.32 \times 10^{-9}}{\text{Threads}} \times \text{Gap (\%)} \times 2^n$$
+
+\end{frame}
+
+
+
+% \begin{frame}[allowframebreaks]{Normalized Energy value statistics}
+
+% \begin{table}[h]
+% \centering
+% \begin{tabular}{l c}
+% \hline
+% Statistic & Normalized Energy \\
+% \hline
+% Best (max)   & 0.99993952 \\
+% Worst (min) & 0.83004852 \\
+% Mean        & 0.94595608 \\
+% Median      & 0.96233060 \\
+% Std. dev.   & 0.0425 \\
+% \hline
+% \end{tabular}
+% \caption{Summary statistics of normalized energy values over 100 runs (for the 100 $max\_iter$ case).}
+% \end{table}
+
+% \begin{table}[h]
+% \centering
+% \begin{tabular}{l c}
+% \hline
+% Statistic & Normalized Energy \\
+% \hline
+% Best (max)   & 1. \\
+% Worst (min) & 0.89970262 \\
+% Mean        & 0.97642265 \\
+% Median      & 0.98642584 \\
+% Std. dev.   & 0.0284 \\
+% \hline
+% \end{tabular}
+% \caption{Summary statistics of normalized energy values over 100 runs (for the 1000 $max\_iter$ case).}
+% \end{table}
+
+% \begin{table}[h]
+% \centering
+% \begin{tabular}{l c}
+% \hline
+% Statistic & Normalized Energy \\
+% \hline
+% Best (max)   & 0.99999606 \\
+% Worst (min) & 0.91698491 \\
+% Mean        & 0.98125215 \\
+% Median      & 0.99774576 \\
+% Std. dev.   & 0.0259 \\
+% \hline
+% \end{tabular}
+% \caption{Summary statistics of normalized energy values over 20 runs (for the 10,000 $max\_iter$ case).}
+% \end{table}
+    
+% \end{frame}
+
+% \begin{frame}{Number of Bits vs Number of BQM variables}
+
+%     \begin{figure}[htp]
+%         \centering
+%         \includegraphics[width=\textwidth]{bits vs number of bqm variables.jpeg}
+%         \caption{Number of bits vs number of bqm variables. Excuse the lack of clarity I just had the image.}
+%         \label{fig: bits vs number of bqm variables.}
+%     \end{figure}
+    
+% \end{frame}
+
+% \begin{frame}[allowframebreaks]{DA1 performance on QAP}
+
+% \begin{itemize}
+%     \item One \textbf{Iteration} is the process of calculating the energy difference (and subsequently the Metropolis-Hasting condition) for all spins in the ensemble at a fixed Temperature (T). Followed by all required flips.
+%     \item \textbf{$\Delta$ T}  is the value of the Temperature step used for cooling. Updates after running `$max\_iter$' number of iterations (or when the early stopping condition is reached.
+%     \item \textbf{max\_iter} is a predefined variable that sets the maximum number of iterations the algorithm performs at a given T.
+%     \item We also stop iterating if the total energy difference after between two iterations is less than \textbf{0.01} and if this happens continuously for \textbf{5\%} of $max\_iter$ number of iterations.
+%     \item We use initial temperature as \textbf{100.0} and final temperature as \textbf{0.01}.
+%     \item Note that in the graph below, all other accepted solutions lie between 88\% and 90\% of optimal energy values
+% \end{itemize}
+
+%     \begin{figure}[htp]
+%         \centering
+%         \includegraphics[width=0.9\textwidth]{Accepted solutions versus delta T.png}
+%         \caption{Number of Accepted solutions versus delta T. The values in the brackets represent number of solutions that reach 95\% of the optimal solution out of 100 independent runs.}
+%         \label{fig: Accepted solutions versus delta T.}
+%     \end{figure}
+
+    
+% \end{frame}
+
+% \begin{frame}{DA1 time performance on QAP}
+
+%     \begin{figure}[htp]
+%         \centering
+%         \includegraphics[width=0.9\textwidth]{Time taken for a single run versus delta T.png}
+%         \caption{Time taken for a single run versus delta T.}
+%         \label{fig: Time taken for a single run versus delta T.}
+%     \end{figure}
+    
+% \end{frame}
+
+% \begin{frame}{DA1 Time per Iteration}
+
+%     \begin{figure}[htp]
+%         \centering
+%         \includegraphics[width=0.9\textwidth]{Average time per iteration in DA1.png}
+%         \caption{Average time per iteration (ms) in DA1.}
+%         \label{fig: Average time per iteration in DA1.}
+%     \end{figure}
+    
+% \end{frame}
+
+
+% \begin{frame}[allowframebreaks]{Energy difference distribution}
+
+%     \begin{figure}[htp]
+%         \centering
+%         \includegraphics[width=0.9\textwidth]{Distribution of Energy difference values across iterations_first half.png}
+%         \caption{Distribution of Energy difference values across iterations (1).}
+%         \label{fig: Distribution of Energy difference values across iterations (1).}
+%     \end{figure}
+%     \begin{figure}[htp]
+%         \centering
+%         \includegraphics[width=0.9\textwidth]{Distribution of Energy difference values across iterations_second half.png}
+%         \caption{Distribution of Energy difference values across iterations (2).}
+%         \label{fig: Distribution of Energy difference values across iterations (2).}
+%     \end{figure}
+% \end{frame}
+
+% \begin{frame}[allowframebreaks]{Time taken versus number of parallel runs}
+
+% The graph shows the time taken by the GPU to complete a fixed number of iterations of the simulated annealing (the actual values of time is not important only the trend).
+
+% \begin{figure}[htp]
+%     \centering
+%     \includegraphics[width=0.65\textwidth]{Time taken vs number of parallel runs.png}
+%     \caption{Time taken vs Number of parallel runs. (problem scale 12)}
+%     \label{fig: Time taken vs number of parallel runs.}
+% \end{figure}
+
+% \begin{itemize}
+%     \item As its visible $2^{15}$ parallel runs (around 30k) for QAP of problem scale 12 is the most optimal for the GH200. This paired with an appropriate temperature schedule is able to find 95\% of the optimal solution in 0.44 seconds.
+%     \item Its worth noting how the time taken increases at the start from $2^1$ to $2^9$ parallel runs even though we should have plenty of threads. This is likely due to the overhead cost (time taken to launch kernels, CPU to GPU memory transfer, etc), but I am not entirely sure as to why it scales the way it does and stays constant from $2^{10}$ to $2^{15}$. But the `doubling' in time that we see after $2^{15}$ is because the GPU is running in patches of $2^{15}$ runs as we hit the limit of available threads.
+% \end{itemize}
+    
+% \end{frame}
+
+% \section{GH200 Benchmarking of QAP}
+
+% \begin{frame}{GH200 Benchmarking of QAP}
+
+%    \begin{table}[h]
+%    \scriptsize
+%     \centering
+%     \begin{tabular}{|c|c|c|c|c|}
+%         \hline
+%         \textbf{Problem Scale} & \textbf{GPU Energy} & \textbf{Gurobi 12.0 Energy} & \textbf{GPU Time (s)} & \textbf{Gurobi Time (s)} \\ \hline
+%         3  & 2.34 & 2.34 & 0.0052 & 0.0314 \\ \hline
+%         4  & 2.21 & 2.21 & 0.0061 & 0.0383 \\ \hline
+%         5  & 5.72 & 5.72 & 0.0241 & 0.1082 \\ \hline
+%         6  & 6.76 & 6.76 & 0.112  & 0.1748 \\ \hline
+%         7  & 9.35 & 9.28 & 0.1428 & 0.4429 \\ \hline
+%         8  & 9.83 & 9.83 & 1.78   & 0.3253 \\ \hline
+%         9  & 16.29 & 16.26 & 24.67 & 0.5087 \\ \hline
+%         10 & 20.33 & 20.27 & 33.41 & 5.9119 \\ \hline
+%         11 & 22.91 & 22.72 & 45.59 & 77.9059 \\ \hline
+%         12 & 29.83 & 29.23 & 62.05 & 847.4936 \\ \hline
+%     \end{tabular}
+%     \caption{Comparison of GPU and Gurobi Energy and Time}
+%     \label{tab:energy_time_comparison}
+% \end{table}
+    
+% \end{frame}
+
+% \begin{frame}{Original Benchmark from the paper}
+
+%     \begin{figure}[htp]
+%         \centering
+%         \includegraphics[width=\textwidth]{QAP Original Benchmark.png}
+%         \bigskip
+%         \caption{QAP Original Benchmark.}
+%         \label{fig: QAP Original Benchmark.}
+%     \end{figure}
+    
+% \end{frame}
+
+% \begin{frame}{GH200 Plot}
+
+%     \begin{figure}[htp]
+%         \centering
+%         \includegraphics[width=0.85\textwidth]{QAP Benchmark GH200.png}
+%         \bigskip
+%         \caption{QAP Benchmark GH200.}
+%         \label{fig: QAP Benchmark GH200.}
+%     \end{figure}
+    
+% \end{frame}
+
+% \begin{frame}{GH200 Benchmark run wise values}
+
+% \begin{table}[h]
+%     \tiny
+%     \centering
+%     \begin{tabular}{ccccccccccc}
+%         \toprule
+%         Problem Scale & Run 1 & Run 2 & Run 3 & Run 4 & Run 5 & Run 6 & Run 7 & Run 8 & Run 9 & Run 10 \\
+%         \midrule
+%         3 & 2.34 & 2.34 & 2.34 & 2.34 & 2.34 & 2.34 & 2.34 & 2.34 & 2.34 & 2.34 \\
+%         4 & 2.21 & 2.21 & 2.21 & 2.21 & 2.21 & 2.21 & 2.21 & 2.21 & 2.21 & 2.21 \\
+%         5 & 5.72 & 5.72 & 5.72 & 5.72 & 5.72 & 5.72 & 5.72 & 5.72 & 5.72 & 5.72 \\
+%         6 & 6.78 & 6.78 & 6.78 & 6.78 & 6.78 & 6.78 & 6.78 & 6.78 & 6.78 & 6.78 \\
+%         7 & 9.83 & 9.83 & 9.83 & 9.83 & 9.83 & 9.83 & 9.83 & 9.83 & 9.83 & 9.83 \\
+%         8 & 16.29 & 16.31 & 16.29 & 16.29 & 16.26 & 16.29 & 16.29 & 16.31 & 16.31 & 16.31 \\
+%         9 & 20.46 & 20.46 & 20.49 & 20.49 & 20.56 & 20.46 & 20.46 & 20.46 & 20.49 & 20.49 \\
+%         10 & 25.33 & 25.33 & 25.39 & 25.39 & 25.39 & 25.33 & 25.33 & 25.33 & 25.39 & 25.39 \\
+%         11 & 22.92 & 22.67 & 20.94 & 20.82 & 23.96 & 22.92 & 22.92 & 22.92 & 22.80 & 22.67 \\
+%         12 & 30.2 & 30.14 & 30.23 & 30.23 & 29.86 & 29.75 & 29.75 & 29.49 & 29.69 & 29.66 \\
+%         \bottomrule
+%     \end{tabular}
+%     \caption{Performance by Run and Problem Scale}
+%     \label{tab:performance_table}
+% \end{table}
+    
+% \end{frame}
+
+% \begin{frame}{GH200 Benchmarking parameters}
+
+% % Requires: \usepackage{booktabs}
+% \begin{table}[h]
+%     \scriptsize
+%     \centering
+%     \begin{tabular}{cccc}
+%         \toprule
+%         Problem Scale & Parallel Sweeps & Number of Iterations & Temperature Parameters \\
+%         \midrule
+%         3  & 1000  & 4    & 1, 0.001, 0.97 \\
+%         4  & 1000  & 5    & 1, 0.001, 0.97 \\
+%         5  & 2000  & 20   & 1, 0.001, 0.97 \\
+%         6  & 5000  & 100  & 1, 0.001, 0.97 \\
+%         7  & 6000  & 1000 & 1, 0.001, 0.97 \\
+%         8  & 10000 & 5000 & 1, 0.001, 0.97 \\
+%         9  & 30000 & 8000 & 2, 0.001, 0.97 \\
+%         10 & 30000 & 8000 & 2, 0.001, 0.97 \\
+%         11 & 30000 & 8000 & 2, 0.001, 0.97 \\
+%         12 & 30000 & 8000 & 2, 0.001, 0.97 \\
+%         \bottomrule
+%     \end{tabular}
+%     \caption{Problem Scale, Parallel Sweeps, Number of Iterations, and Temperature Parameters.}
+%     \label{tab:parameters}
+% \end{table}
+    
+% \end{frame}
+
+\end{document}
