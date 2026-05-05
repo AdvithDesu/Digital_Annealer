@@ -491,14 +491,6 @@ INPUT C:\Users\advi\AppData\Local\Programs\MiKTeX\fonts\tfm\public\cm\cmss10.tfm
 INPUT C:\Users\advi\AppData\Local\Programs\MiKTeX\fonts\tfm\public\cm\cmss8.tfm
 INPUT C:\Users\advi\AppData\Local\Programs\MiKTeX\fonts\tfm\public\cm\cmss8.tfm
 INPUT C:\Users\advi\AppData\Local\MiKTeX\fonts\map\pdftex\pdftex.map
-INPUT .\GPU Threads.png
-INPUT .\GPU Threads.png
-INPUT .\GPU Threads.png
-INPUT .\GPU Threads.png
-INPUT .\GPU Threads.png
-INPUT .\GPU Threads.png
-INPUT .\GPU Threads.png
-INPUT C:\Users\advi\AppData\Local\Programs\MiKTeX\fonts\tfm\public\cm\cmss8.tfm
 INPUT C:\Users\advi\AppData\Local\Programs\MiKTeX\fonts\tfm\public\cm\cmmi9.tfm
 INPUT C:\Users\advi\AppData\Local\Programs\MiKTeX\fonts\tfm\public\cm\cmmi6.tfm
 INPUT C:\Users\advi\AppData\Local\Programs\MiKTeX\fonts\tfm\public\cm\cmsy9.tfm
@@ -524,14 +516,8 @@ INPUT C:\Users\advi\AppData\Local\Programs\MiKTeX\tex\latex\sansmathaccent\ot1ma
 INPUT C:\Users\advi\AppData\Local\Programs\MiKTeX\fonts\tfm\public\sansmathaccent\mathkerncmssi9.tfm
 INPUT C:\Users\advi\AppData\Local\Programs\MiKTeX\fonts\tfm\public\sansmathaccent\mathkerncmssi8.tfm
 INPUT C:\Users\advi\AppData\Local\Programs\MiKTeX\fonts\tfm\public\sansmathaccent\mathkerncmssi8.tfm
-INPUT .\Energy calculation in DA1.png
-INPUT .\Energy calculation in DA1.png
-INPUT .\Energy calculation in DA1.png
-INPUT .\Energy calculation in DA1.png
-INPUT .\Energy calculation in DA1.png
-INPUT .\Energy calculation in DA1.png
-INPUT .\Energy calculation in DA1.png
 INPUT C:\Users\advi\AppData\Local\Programs\MiKTeX\fonts\tfm\public\cm\cmssbx10.tfm
+INPUT C:\Users\advi\AppData\Local\Programs\MiKTeX\fonts\tfm\public\cm\cmssi9.tfm
 INPUT C:\Users\advi\AppData\Local\Programs\MiKTeX\fonts\tfm\public\cm\cmss8.tfm
 INPUT C:\Users\advi\AppData\Local\Programs\MiKTeX\fonts\tfm\public\cm\cmmi10.tfm
 INPUT C:\Users\advi\AppData\Local\Programs\MiKTeX\fonts\tfm\public\cm\cmmi8.tfm
@@ -545,6 +531,7 @@ INPUT C:\Users\advi\AppData\Local\Programs\MiKTeX\fonts\tfm\public\amsfonts\symb
 INPUT C:\Users\advi\AppData\Local\Programs\MiKTeX\fonts\tfm\public\amsfonts\symbols\msbm10.tfm
 INPUT C:\Users\advi\AppData\Local\Programs\MiKTeX\fonts\tfm\public\sansmathaccent\mathkerncmssi10.tfm
 INPUT C:\Users\advi\AppData\Local\Programs\MiKTeX\fonts\tfm\public\sansmathaccent\mathkerncmssi8.tfm
+INPUT C:\Users\advi\AppData\Local\Programs\MiKTeX\fonts\tfm\public\cm\cmssbx10.tfm
 INPUT .\Sparsity of J matrix for 162 BQM.png
 INPUT .\Sparsity of J matrix for 162 BQM.png
 INPUT .\Sparsity of J matrix for 162 BQM.png
@@ -552,17 +539,27 @@ INPUT .\Sparsity of J matrix for 162 BQM.png
 INPUT .\Sparsity of J matrix for 162 BQM.png
 INPUT .\Sparsity of J matrix for 162 BQM.png
 INPUT .\Sparsity of J matrix for 162 BQM.png
-INPUT C:\Users\advi\AppData\Local\Programs\MiKTeX\fonts\tfm\public\cm\cmssi9.tfm
 INPUT C:\Users\advi\AppData\Local\Programs\MiKTeX\fonts\tfm\public\cm\cmtt9.tfm
 INPUT C:\Users\advi\AppData\Local\Programs\MiKTeX\fonts\tfm\public\cm\cmtt8.tfm
 INPUT C:\Users\advi\AppData\Local\Programs\MiKTeX\fonts\tfm\public\cm\cmtt8.tfm
-INPUT .\bqm variables vs time taken for J construction and DA1.png
-INPUT .\bqm variables vs time taken for J construction and DA1.png
-INPUT .\bqm variables vs time taken for J construction and DA1.png
-INPUT .\bqm variables vs time taken for J construction and DA1.png
-INPUT .\bqm variables vs time taken for J construction and DA1.png
-INPUT .\bqm variables vs time taken for J construction and DA1.png
-INPUT .\bqm variables vs time taken for J construction and DA1.png
+INPUT C:\Users\advi\AppData\Local\Programs\MiKTeX\fonts\tfm\public\cm\cmss8.tfm
+INPUT C:\Users\advi\AppData\Local\Programs\MiKTeX\fonts\tfm\public\cm\cmcsc10.tfm
+INPUT C:\Users\advi\AppData\Local\Programs\MiKTeX\fonts\tfm\public\cm\cmcsc10.tfm
+INPUT C:\Users\advi\AppData\Local\Programs\MiKTeX\fonts\tfm\public\cm\cmcsc10.tfm
+INPUT .\GPU Threads.png
+INPUT .\GPU Threads.png
+INPUT .\GPU Threads.png
+INPUT .\GPU Threads.png
+INPUT .\GPU Threads.png
+INPUT .\GPU Threads.png
+INPUT .\GPU Threads.png
+INPUT .\Energy calculation in DA1.png
+INPUT .\Energy calculation in DA1.png
+INPUT .\Energy calculation in DA1.png
+INPUT .\Energy calculation in DA1.png
+INPUT .\Energy calculation in DA1.png
+INPUT .\Energy calculation in DA1.png
+INPUT .\Energy calculation in DA1.png
 INPUT .\bqm variables vs number of densely connected spins.png
 INPUT .\bqm variables vs number of densely connected spins.png
 INPUT .\bqm variables vs number of densely connected spins.png
@@ -570,20 +567,6 @@ INPUT .\bqm variables vs number of densely connected spins.png
 INPUT .\bqm variables vs number of densely connected spins.png
 INPUT .\bqm variables vs number of densely connected spins.png
 INPUT .\bqm variables vs number of densely connected spins.png
-INPUT .\bqm variables vs number of non zero values in J.png
-INPUT .\bqm variables vs number of non zero values in J.png
-INPUT .\bqm variables vs number of non zero values in J.png
-INPUT .\bqm variables vs number of non zero values in J.png
-INPUT .\bqm variables vs number of non zero values in J.png
-INPUT .\bqm variables vs number of non zero values in J.png
-INPUT .\bqm variables vs number of non zero values in J.png
-INPUT .\bqm variables vs absolute energy value and average delta E vales.png
-INPUT .\bqm variables vs absolute energy value and average delta E vales.png
-INPUT .\bqm variables vs absolute energy value and average delta E vales.png
-INPUT .\bqm variables vs absolute energy value and average delta E vales.png
-INPUT .\bqm variables vs absolute energy value and average delta E vales.png
-INPUT .\bqm variables vs absolute energy value and average delta E vales.png
-INPUT .\bqm variables vs absolute energy value and average delta E vales.png
 INPUT .\spins_vs_time_per_iteration_for_mac_gh200.png
 INPUT .\spins_vs_time_per_iteration_for_mac_gh200.png
 INPUT .\spins_vs_time_per_iteration_for_mac_gh200.png
@@ -605,13 +588,6 @@ INPUT .\Execution Time for graph coloring SA.png
 INPUT .\Execution Time for graph coloring SA.png
 INPUT .\Execution Time for graph coloring SA.png
 INPUT .\Execution Time for graph coloring SA.png
-INPUT .\percentage_difference_predicted_factors.png
-INPUT .\percentage_difference_predicted_factors.png
-INPUT .\percentage_difference_predicted_factors.png
-INPUT .\percentage_difference_predicted_factors.png
-INPUT .\percentage_difference_predicted_factors.png
-INPUT .\percentage_difference_predicted_factors.png
-INPUT .\percentage_difference_predicted_factors.png
 INPUT .\Percentage Gap between real and estimated P.png
 INPUT .\Percentage Gap between real and estimated P.png
 INPUT .\Percentage Gap between real and estimated P.png
@@ -632,8 +608,14 @@ OUTPUT main.snm
 INPUT main.aux
 INPUT .\main.out
 INPUT .\main.out
+INPUT C:\Users\advi\AppData\Local\Programs\MiKTeX\fonts\type1\public\amsfonts\cm\cmcsc10.pfb
+INPUT C:\Users\advi\AppData\Local\Programs\MiKTeX\fonts\type1\public\amsfonts\cm\cmcsc10.pfb
+INPUT C:\Users\advi\AppData\Local\Programs\MiKTeX\fonts\type1\public\amsfonts\cmextra\cmex8.pfb
+INPUT C:\Users\advi\AppData\Local\Programs\MiKTeX\fonts\type1\public\amsfonts\cmextra\cmex8.pfb
 INPUT C:\Users\advi\AppData\Local\Programs\MiKTeX\fonts\type1\public\amsfonts\cmextra\cmex9.pfb
 INPUT C:\Users\advi\AppData\Local\Programs\MiKTeX\fonts\type1\public\amsfonts\cmextra\cmex9.pfb
+INPUT C:\Users\advi\AppData\Local\Programs\MiKTeX\fonts\type1\public\amsfonts\cm\cmmi5.pfb
+INPUT C:\Users\advi\AppData\Local\Programs\MiKTeX\fonts\type1\public\amsfonts\cm\cmmi5.pfb
 INPUT C:\Users\advi\AppData\Local\Programs\MiKTeX\fonts\type1\public\amsfonts\cm\cmmi6.pfb
 INPUT C:\Users\advi\AppData\Local\Programs\MiKTeX\fonts\type1\public\amsfonts\cm\cmmi6.pfb
 INPUT C:\Users\advi\AppData\Local\Programs\MiKTeX\fonts\type1\public\amsfonts\cm\cmmi8.pfb
@@ -654,8 +636,12 @@ INPUT C:\Users\advi\AppData\Local\Programs\MiKTeX\fonts\type1\public\amsfonts\cm
 INPUT C:\Users\advi\AppData\Local\Programs\MiKTeX\fonts\type1\public\amsfonts\cm\cmssi8.pfb
 INPUT C:\Users\advi\AppData\Local\Programs\MiKTeX\fonts\type1\public\amsfonts\cm\cmssi9.pfb
 INPUT C:\Users\advi\AppData\Local\Programs\MiKTeX\fonts\type1\public\amsfonts\cm\cmssi9.pfb
+INPUT C:\Users\advi\AppData\Local\Programs\MiKTeX\fonts\type1\public\amsfonts\cm\cmsy10.pfb
+INPUT C:\Users\advi\AppData\Local\Programs\MiKTeX\fonts\type1\public\amsfonts\cm\cmsy10.pfb
 INPUT C:\Users\advi\AppData\Local\Programs\MiKTeX\fonts\type1\public\amsfonts\cm\cmsy6.pfb
 INPUT C:\Users\advi\AppData\Local\Programs\MiKTeX\fonts\type1\public\amsfonts\cm\cmsy6.pfb
+INPUT C:\Users\advi\AppData\Local\Programs\MiKTeX\fonts\type1\public\amsfonts\cm\cmsy8.pfb
+INPUT C:\Users\advi\AppData\Local\Programs\MiKTeX\fonts\type1\public\amsfonts\cm\cmsy8.pfb
 INPUT C:\Users\advi\AppData\Local\Programs\MiKTeX\fonts\type1\public\amsfonts\cm\cmsy9.pfb
 INPUT C:\Users\advi\AppData\Local\Programs\MiKTeX\fonts\type1\public\amsfonts\cm\cmsy9.pfb
 INPUT C:\Users\advi\AppData\Local\Programs\MiKTeX\fonts\type1\public\amsfonts\cm\cmtt9.pfb

@@ -52,142 +52,6 @@
     \titlepage
 \end{frame}
 
-% % Table of contents
-% \begin{frame}{Table of Contents}
-%     \tableofcontents
-% \end{frame}
-
-\begin{frame}{GPU Kernel}
-
-    Digital Annealer 1 (DA1) manually launches kernels by assigning specific threads to do the energy calculations. See \href{https://github.com/AdvithDesu/QAP-using-Simulated-Annealing-optimized-for-GPU}{\text{GitHub Link}} for the code used.
-
-    \bigskip
-
-    \begin{figure}[htp]
-        \centering
-        \includegraphics[width=0.85\textwidth]{GPU Threads.png}
-        \caption{GPU Threads and Thread blocks.}
-        \label{fig: GPU Threads and Thread blocks.}
-    \end{figure}
-    
-\end{frame}
-
-\begin{frame}{GPU Thread Calculation in DA1}
-
-    Each thread $i$ calculates the local field $L_i = \sum_j J_{ij}s_j + h_i$ and the energy difference is then calculated as $-2 \times s_i \times L_i$ depending on which $i^{\text{th}}$ spin flipped.
-
-    \begin{figure}[htp]
-        \centering
-        \includegraphics[width=0.65\textwidth]{Energy calculation in DA1.png}
-        \caption{Energy calculation in DA1.}
-        \label{fig: Energy calculation in DA1.}
-    \end{figure}
-    
-\end{frame}
-
-\begin{frame}{Pseudo-code for Digital Annealer 1 (DA1)}
-
-    \begin{algorithm}[H]
-\caption{Pseudo-code for Digital Annealer 1}
-\begin{algorithmic}[1]
-\Require Initial temperature, number of iterations $iters$, connectivity matrix $J[N][N]$ and magnetic field $h[N]$
-\Ensure Spin configuration $s[N]$
-
-\State \textbf{Initialization:} Randomly initialize spins $s[N]$, $k = 0$
-\State Copy $J[N][N]$ and $h[N]$ to GPU memory
-
-\While{$k \leq iters$}
-    \For{$i = 1 : N$} \Comment{$N$ blocks for $N$-spin model}
-        \For{$j = 1 : N/P$}
-            \State Calculate partial sum of $\Delta H(s_i)$ by computing $J[i][j] \cdot s[j]$
-        \EndFor
-
-        \For{$p = 1 : \log(P)$} \Comment{Using $P$ threads}
-            \State Reduction of partial sum of $\Delta H(s_i)$
-        \EndFor
-
-        \State Calculate $P_B(\Delta H, T)$ for $\Delta H(s_i)$ to determine state of spin $s_i$
-    \EndFor \Comment{For all $N$ spins in ensemble}
-
-    \State Update all possible spins
-\EndWhile
-\State Decrease temperature $T$ linearly
-
-\end{algorithmic}
-\end{algorithm}
-
-    
-\end{frame}
-
-
-\begin{frame}[allowframebreaks]{Pseudo-code for DA1 with fractional flips}
-
-
-\begin{algorithmic}[1]
-
-\Require Initial temperature, number of iterations $iters$, connectivity matrix $J[N][N]$, magnetic field $h[N]$, flip fraction $\rho$
-\Ensure Spin configuration $s[N]$
-
-\State \textbf{Initialization:} Randomly initialize spins $s[N]$
-\State Copy $J$, $h$, and $s$ to GPU memory
-
-\While{$k \leq iters$}
-
-    \State $A \gets \emptyset$ \Comment{List of Metropolis-accepted spins}
-
-    % ----------- Phase 1: Compute candidates -----------
-    \For{$i = 1 : N$ \textbf{in parallel}} \Comment{$N$ GPU blocks}
-
-        \For{$j = 1 : N/P$} \Comment{$P$ threads per block}
-            \State Compute partial sum of local field contribution:
-            \[
-                S_i \mathrel{+}= J[i][j] \cdot s[j]
-            \]
-        \EndFor
-
-        \For{$p = 1 : \log(P)$} \Comment{Parallel reduction}
-            \State Reduce partial sums to obtain full local field $S_i$
-        \EndFor
-        \State Compute energy change:
-        \[
-            \Delta H_i = -2\, s[i]\,(S_i + h[i])
-        \]
-
-        \State Compute Metropolis probability:
-        \[
-            P_B = \min\{1,\exp(-\Delta H_i/T)\}
-        \]
-
-        \If{random() $< P_B$}
-            \State Append index $i$ to $A$
-        \EndIf
-
-    \EndFor
-    \Comment{None of the spins are flipped}
-
-    % ----------- Phase 2: Exact-k subset selection -----------
-    \State Let $M \gets |A|$ \Comment{Total number accepted}
-
-    \State $k \gets \lceil \rho \cdot M \rceil$ \Comment{Exact number of flips to perform}
-
-    \State Randomly shuffle the list $A$ (Fisher--Yates)
-    \State $A_k \gets$ first $k$ elements of $A$ \Comment{Random subset of size $k$}
-
-    % ----------- Phase 3: Apply selected flips -----------
-    \For{each $i \in A_k$ \textbf{in parallel}}
-        \State Flip spin: $s[i] \gets -s[i]$
-    \EndFor
-
-    \State Update iteration counter: $k \gets k + 1$
-
-\EndWhile
-
-\State Decrease temperature $T$ linearly
-\State \Return $s[N]$
-
-\end{algorithmic}
-
-\end{frame}
 
 %====================================================
 \section{Introduction}
@@ -266,66 +130,333 @@ but gives fewer preprocessing opportunities.
 \section{Classical Pre-processing}
 %====================================================
 
-\begin{frame}{Core Reduction Rules}
-For binary variables $x_i\in\{0,1\}$:
-
-\textbf{Sum rules}
+\begin{frame}{Rule 1: Saturated Sum}
+For binary $x_i \in \{0,1\}$:
 \[
-\sum_i x_i=n \Rightarrow x_i=1,\qquad
-\sum_i x_i=0 \Rightarrow x_i=0.
+\sum_{i=1}^{n} x_i = n \quad\Longrightarrow\quad x_i = 1 \ \forall i.
 \]
 
-\textbf{Complement rule}
-\[
-x_1+x_2=1 \Rightarrow x_2=1-x_1.
-\]
+\textbf{Why:} the only way $n$ binary variables sum to $n$ is for every one of them to be $1$.
 
-\textbf{Power rule}
+\medskip
+A symmetric form with negative coefficients:
 \[
-x^m=x,\quad m\ge2.
+\sum_{i=1}^{n} -x_i = -n \quad\Longrightarrow\quad x_i = 1 \ \forall i.
 \]
 \end{frame}
 
-\begin{frame}{Coefficient and Parity Rules}
-General linear constraint:
+\begin{frame}{Rule 2: Zero Sum}
+For binary $x_i \in \{0,1\}$:
 \[
-\sum_i c_i x_i + C = 0.
+\sum_{i=1}^{n} x_i = 0 \quad\Longrightarrow\quad x_i = 0 \ \forall i.
 \]
 
-Let
-\[
-S_+=\sum_{c_i>0}c_i,\quad S_-=\sum_{c_j<0}|c_j|.
-\]
+\textbf{Why:} a sum of non-negative binaries equals $0$ only when every term is $0$.
 
-\begin{itemize}
-\item Large coefficients can force $x_i=0$ or $1$.
-\item Parity constraints:
-\begin{align*}
-x_1+x_2+\text{even} &= \text{even} \Rightarrow x_1=x_2,\\
-x_1+x_2+\text{even} &= \text{odd} \Rightarrow x_1+x_2=1.
-\end{align*}
-\end{itemize}
+\medskip
+The same conclusion holds with negative coefficients:
+\[
+\sum_{i=1}^{n} -x_i = 0 \quad\Longrightarrow\quad x_i = 0 \ \forall i.
+\]
 \end{frame}
 
-\begin{frame}{Example: $N=15$ Reduction}
-Initial clauses (example):
+\begin{frame}{Rule 3: Doubling Rule}
+For binary variables $x_1, x_2, x_3 \in \{0,1\}$:
+\[
+x_1 + x_2 = 2 x_3 \quad\Longrightarrow\quad x_1 = x_2 = x_3.
+\]
+
+\textbf{Why:} LHS $\in \{0,1,2\}$ and RHS $\in \{0,2\}$. Equality forces LHS even, so $x_1+x_2 \in \{0,2\}$ — both equal, and equal to $x_3$.
+
+\medskip
+\textbf{Use in factorization:} appears whenever a column clause has only two factor-bit terms balanced against a single carry, e.g.
+\[
+p_k + q_k = 2 s \;\Rightarrow\; p_k = q_k = s.
+\]
+\end{frame}
+
+\begin{frame}{Rule 4: Coefficient Bound Rule}
+General linear constraint on $x_i \in \{0,1\}$:
+\[
+\sum_i c_i x_i + C = 0,\qquad
+S_+ \!=\! \sum_{c_i>0} c_i,\quad S_- \!=\! \sum_{c_j<0} |c_j|.
+\]
+
+If a single coefficient is larger than the max possible opposing sum, the variable is \emph{forced}:
+
+\smallskip
+\textbf{Positive coefficients} ($c_i > 0$):
+\[
+c_i > S_- - C \;\Rightarrow\; x_i = 0,\qquad
+c_i > S_+ + C \;\Rightarrow\; x_i = 1.
+\]
+
+\textbf{Negative coefficients} ($c_j < 0$, $|c_j|$ magnitude):
+\[
+|c_j| > S_+ + C \;\Rightarrow\; x_j = 0,\qquad
+|c_j| > S_- - C \;\Rightarrow\; x_j = 1.
+\]
+
+\textbf{Example:} $x_1 + x_2 = 2x_3 + 1$. Coefficient of $x_3$ is $2$, max LHS is $2$, so $x_3$ cannot be $1$ $\Rightarrow x_3 = 0$.
+\end{frame}
+
+\begin{frame}{Rule 5: Complement Rule}
+For binary $x_1, x_2 \in \{0,1\}$:
+\[
+x_1 + x_2 = 1 \quad\Longrightarrow\quad x_2 = 1 - x_1, \quad x_1 x_2 = 0.
+\]
+
+\textbf{Why:} the only solutions are $(0,1)$ and $(1,0)$ — exactly one variable is $1$, so their product is always $0$.
+
+\medskip
+\textbf{Use in factorization:} eliminates one variable outright (substitute $x_2 \to 1-x_1$) and kills any quadratic term $x_1 x_2$ that appears in a column clause.
+\end{frame}
+
+\begin{frame}{Rule 6: Complementary Pair Rule}
+For a constraint $\sum_i c_i x_i + C = 0$ with $S_+, S_-$ as before:
+
+\smallskip
+\textbf{Two positive coefficients} $c_i, c_j > 0$:
+\[
+c_i + c_j > S_- - C \quad\text{and}\quad c_i + c_j > S_+ + C
+\]
+\[
+\Longrightarrow\quad x_j = 1 - x_i.
+\]
+
+\textbf{Two negative coefficients} $c_i, c_j < 0$ (let $\bar c = |c|$):
+\[
+\bar c_i + \bar c_j > S_+ + C \quad\text{and}\quad \bar c_i + \bar c_j > S_- - C
+\]
+\[
+\Longrightarrow\quad x_j = 1 - x_i.
+\]
+
+\textbf{Why:} the first inequality forbids both variables from being $1$ simultaneously; the second forbids both from being $0$. The only remaining option is one of each.
+\end{frame}
+
+\begin{frame}{Parity Rule}
+Both sides of a clause must have the same parity:
 \begin{align*}
-C_1 &: -p_1-q_1+2s_{1,2}+1=0,\\
-C_2 &: -p_1q_1-p_2-q_2-s_{1,2}+2s_{2,3}+4s_{2,4}+1=0.
+x_1 + x_2 + \text{even} &= \text{even} \;\Rightarrow\; x_1 = x_2, \\[3pt]
+x_1 + x_2 + \text{even} &= \text{odd}  \;\Rightarrow\; x_1 + x_2 = 1.
 \end{align*}
 
-Applying rules:
+\textbf{Example:}
+\[
+x_1 + x_2 + 2x_3 = 2y_1 + 4y_2 \;\Rightarrow\; x_1 = x_2,
+\]
+\[
+x_1 + x_2 + 2x_3 = 2y_1 + 4y_2 + 1 \;\Rightarrow\; x_1 + x_2 = 1.
+\]
+
+\medskip
+\textbf{Why it matters:} column clauses balance a small sum of factor bits against carries with even coefficients ($2 s_{i,i+1},\ 4 s_{i,i+2},\dots$). The parity of the factor-bit sum is therefore locked by $N_i$.
+\end{frame}
+
+\begin{frame}{Power Rule}
+For any binary variable $x \in \{0,1\}$:
+\[
+x^m = x, \quad m = 2, 3, \dots
+\]
+
+\textbf{Why:} $0^m = 0$ and $1^m = 1$ for all positive integers $m$.
+
+\medskip
+\textbf{Use in factorization:} after squaring the energy function $E = \sum_i C_i^2$, every $p_k^2,\ q_k^2,\ s^2$ collapses back to its linear form $p_k,\ q_k,\ s$. This is what makes the squared objective expressible as a (degree-2) QUBO once cubics/quartics are quadrized.
+\end{frame}
+
+
+%=================================================
+
+\begin{frame}{Worked Example: $N = 391 = 17 \times 23$}
+
+\textbf{Setup:}
 \begin{itemize}
-\item Fix carries $s_{1,2}=s_{2,4}=0$.
-\item Complement relation: $q_1=1-p_1$.
-\item Power rule: $p_1^2=p_1$.
+  \item $391 = 110000111_2$
+  \item Fixed bits: $p_0 = q_0 = 1$ (odd), $p_4 = q_4 = 1$ (MSB)
+  \item \textbf{Free bits:} $p_1, p_2, p_3$ and $q_1, q_2, q_3$ — 6 unknowns
 \end{itemize}
 
-Final reduced constraint:
+\medskip
+\textbf{Long multiplication table} (cross-product $p_a q_b$ sits in column $a+b$):
+
+\begin{center}
+\scriptsize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{|c|c|c|c|c|c|c|c|c|c|}
+\hline
+ & $2^8$ & $2^7$ & $2^6$ & $2^5$ & $2^4$ & $2^3$ & $2^2$ & $2^1$ & $2^0$ \\
+\hline
+$P$ &     &     &     &     & 1     & $p_3$ & $p_2$ & $p_1$ & 1     \\
+$Q$ &     &     &     &     & 1     & $q_3$ & $q_2$ & $q_1$ & 1     \\
+\hline
+        &     &     &     &     & 1     & $p_3$ & $p_2$ & $p_1$ & 1 \\
+        &     &     &     & $q_1$ & $p_3 q_1$ & $p_2 q_1$ & $p_1 q_1$ & $q_1$ &  \\
+        &     &     & $q_2$ & $p_3 q_2$ & $p_2 q_2$ & $p_1 q_2$ & $q_2$ &     &     \\
+        &     & $q_3$ & $p_3 q_3$ & $p_2 q_3$ & $p_1 q_3$ & $q_3$ &     &     &     \\
+        & 1   & $p_3$ & $p_2$ & $p_1$ & 1     &     &     &     &     \\
+\hline
+Carry-outs & & $s_{6,7},s_{6,8}$ & $s_{5,6},s_{5,7}$ & $s_{4,5},s_{4,6}$ & $s_{3,4},s_{3,5}$ & $s_{2,3},s_{2,4}$ & $s_{1,2}$ & & \\
+\hline
+$N=391$ & 1 & 1 & 0 & 0 & 0 & 0 & 1 & 1 & 1 \\
+\hline
+\end{tabular}
+\end{center}
+
+Carry $s_{i,j}$ = bit of column $i$'s carry destined for column $j$ (coefficient $2^{j-i}$).
+\end{frame}
+
+\begin{frame}{Column Clauses: $C_i = 0$}
+
+\small
+Each column $i$: $(\text{column sum}) + (\text{carries in}) = N_i + 2 s_{i,i+1} + 4 s_{i,i+2}$.
+
+\medskip
+\begin{align*}
+C_0 &:\ 1 - 1 = 0 \quad \checkmark\\
+C_1 &:\ p_1 + q_1 - 1 - 2 s_{1,2} = 0 \\
+C_2 &:\ p_2 + q_2 + p_1 q_1 + s_{1,2} - 1 - 2 s_{2,3} - 4 s_{2,4} = 0 \\
+C_3 &:\ p_3 + q_3 + p_1 q_2 + p_2 q_1 + s_{2,3} - 2 s_{3,4} - 4 s_{3,5} = 0 \\
+C_4 &:\ 2 + p_1 q_3 + p_3 q_1 + p_2 q_2 + s_{2,4} + s_{3,4} - 2 s_{4,5} - 4 s_{4,6} = 0 \\
+C_5 &:\ p_1 + q_1 + p_2 q_3 + p_3 q_2 + s_{3,5} + s_{4,5} - 2 s_{5,6} - 4 s_{5,7} = 0 \\
+C_6 &:\ p_2 + q_2 + p_3 q_3 + s_{4,6} + s_{5,6} - 2 s_{6,7} - 4 s_{6,8} = 0 \\
+C_7 &:\ p_3 + q_3 + s_{5,7} + s_{6,7} - 1 - 2 s_{7,8} = 0 \\
+C_8 &:\ 1 + s_{6,8} + s_{7,8} - 1 = 0
+\end{align*}
+\end{frame}
+
+\begin{frame}{Applying Reduction Rules}
+\small
+
+\textbf{$C_8$ (Rule 2, sum $= 0$):} $s_{6,8} + s_{7,8} = 0 \Rightarrow \boxed{s_{6,8} = s_{7,8} = 0}$.
+
+\medskip
+\textbf{$C_2$ (Rule 4, large coefficient):} LHS terms $p_2{+}q_2{+}p_1q_1{+}s_{1,2} \le 4$, but coefficient of $s_{2,4}$ is $4$. If $s_{2,4}{=}1$, need LHS $\ge 5$. \quad $\boxed{s_{2,4} = 0}$.
+
+\medskip
+\textbf{$C_1$ (Rule 5):} $p_1 + q_1 = 1 + 2 s_{1,2}$. Max sum $= 2 < 3$, so $s_{1,2} = 0$:
 \[
-2p_1p_2-p_1-p_2+1=0
-\Rightarrow p_1+p_2=1.
+\boxed{s_{1,2} = 0,\quad q_1 = 1 - p_1} \quad\Rightarrow\quad p_1 q_1 = p_1(1-p_1) = 0
 \]
+
+\medskip
+\textbf{$C_2$ (after substitutions):} $p_2 + q_2 = 1 + 2 s_{2,3}$.\ Same logic as $C_1$:
+\[
+\boxed{s_{2,3} = 0,\quad q_2 = 1 - p_2}
+\]
+
+\medskip
+\textbf{$C_7$ (Rule 2, sum $= 1$ exactly-one):}
+\[
+p_3 + q_3 + s_{5,7} + s_{6,7} = 1 \quad (s_{7,8}=0 \text{ already})
+\]
+Exactly one of these four binaries equals 1.
+\end{frame}
+
+\begin{frame}{Remaining Structure After Pre-processing}
+\small
+
+After the rules above, we have eliminated $5$ variables ($s_{1,2}, s_{2,3}, s_{2,4}, s_{6,8}, s_{7,8}$) and reduced $q_1, q_2$ to functions of $p_1, p_2$.
+
+\medskip
+\textbf{Free QUBO variables (13):}
+\[
+\{p_1, p_2, p_3, q_3\} \cup \{s_{3,4}, s_{3,5}, s_{4,5}, s_{4,6}, s_{5,6}, s_{5,7}, s_{6,7}\}
+\quad (\text{plus } 2 \text{ auxiliaries from quadrization})
+\]
+
+\textbf{Remaining clauses} (after substituting $q_1{=}1{-}p_1,\ q_2{=}1{-}p_2$):
+\begin{align*}
+C_3 &:\ p_3 + q_3 + p_1(1{-}p_2) + p_2(1{-}p_1) - 2 s_{3,4} - 4 s_{3,5} = 0 \\
+    &\ \ = p_3 + q_3 + p_1 + p_2 - 2 p_1 p_2 - 2 s_{3,4} - 4 s_{3,5} = 0 \\
+C_4 &:\ 2 + p_1 q_3 + p_3(1{-}p_1) + p_2(1{-}p_2) + s_{3,4} - 2 s_{4,5} - 4 s_{4,6} = 0 \\
+    &\ \ = 2 + p_1 q_3 + p_3 - p_1 p_3 + s_{3,4} - 2 s_{4,5} - 4 s_{4,6} = 0 \\
+C_5 &:\ 1 + p_2 q_3 + p_3(1{-}p_2) + s_{3,5} + s_{4,5} - 2 s_{5,6} - 4 s_{5,7} = 0 \\
+C_6 &:\ 1 + p_3 q_3 + s_{4,6} + s_{5,6} - 2 s_{6,7} = 0 \\
+C_7 &:\ p_3 + q_3 + s_{5,7} + s_{6,7} = 1
+\end{align*}
+
+\textbf{Cubic terms appear} after squaring (e.g.\ $p_1 p_2 \cdot s_{3,4}$ in $C_3^2$, $p_1 p_3 \cdot s_{4,5}$ in $C_4^2$) $\Rightarrow$ \textbf{quadrization required}.
+\end{frame}
+
+\begin{frame}{Quadrization and QUBO Construction}
+\small
+
+\textbf{Energy function:} $E = \sum_{i=3}^{7} C_i^2$. Squaring introduces cubics like $a\cdot p_i p_j s_{k,\ell}$.
+
+\medskip
+\textbf{Rosenberg substitution:} replace each $AB$ pair appearing in a cubic by an auxiliary $w$, with penalty
+\[
+P(A,B,w) = M\bigl(AB - 2Aw - 2Bw + 3w\bigr),\qquad M \gg \max\,|\text{coeff}|.
+\]
+$P=0$ iff $w = AB$. After substitution every cubic $A B \cdot s$ becomes $w \cdot s$ (quadratic).
+
+\medskip
+\textbf{Auxiliaries needed:} $w_1 = p_1 p_2,\ w_2 = p_1 p_3$.
+
+\medskip
+\textbf{Full QUBO:}
+\[
+H = \sum_{i=3}^{7} C_i^2 \Big|_{w_1 \to p_1 p_2,\, w_2 \to p_1 p_3}
+\;+\; M\bigl[P(p_1,p_2,w_1) + P(p_1,p_3,w_2)\bigr]
+\]
+
+\textbf{Active QUBO variables (13 total):}
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+Original (4) & $p_1,\ p_2,\ p_3,\ q_3$ \\
+Carry (7)    & $s_{3,4},\ s_{3,5},\ s_{4,5},\ s_{4,6},\ s_{5,6},\ s_{5,7},\ s_{6,7}$ \\
+Auxiliary (2) & $w_1 = p_1 p_2,\ w_2 = p_1 p_3$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+\end{frame}
+
+\begin{frame}{QUBO Matrix Structure}
+\small
+
+QUBO form: $H = \sum_i h_i x_i + \sum_{i<j} Q_{ij} x_i x_j + \text{const}$.
+
+\medskip
+\textbf{Example: contribution of $C_1^2$ before $C_1$ was eliminated} (illustrative pattern):
+\[
+C_1^2 = (p_1 + q_1 - 1 - 2 s_{1,2})^2
+\xrightarrow{x^2 = x}
+-p_1 - q_1 + 8 s_{1,2} + 2 p_1 q_1 - 4 p_1 s_{1,2} - 4 q_1 s_{1,2} + 1.
+\]
+
+\medskip
+\textbf{Sketch of nonzero entries} of $Q$ for $N=391$ (qualitative):
+
+\begin{center}
+\scriptsize
+\begin{tabular}{l|cccc|ccccccc|cc}
+\toprule
+        & $p_1$ & $p_2$ & $p_3$ & $q_3$ & $s_{3,4}$ & $s_{3,5}$ & $s_{4,5}$ & $s_{4,6}$ & $s_{5,6}$ & $s_{5,7}$ & $s_{6,7}$ & $w_1$ & $w_2$ \\
+\midrule
+$p_1$    & $\bullet$ & $\bullet$ & $\bullet$ & $\bullet$ & & & & & & & & $\bullet$ & $\bullet$ \\
+$p_2$    &   & $\bullet$ & $\bullet$ & $\bullet$ & $\bullet$ & $\bullet$ & & & & & & $\bullet$ &   \\
+$p_3$    &   &   & $\bullet$ & $\bullet$ & $\bullet$ & & $\bullet$ & $\bullet$ & & & $\bullet$ &   & $\bullet$ \\
+$q_3$    &   &   &   & $\bullet$ & & & $\bullet$ & $\bullet$ & $\bullet$ & $\bullet$ & $\bullet$ & & \\
+\midrule
+$s_{3,4}$ & & & & & $\bullet$ & $\bullet$ & $\bullet$ & $\bullet$ & & & & & \\
+$s_{3,5}$ & & & & & & $\bullet$ & $\bullet$ & & $\bullet$ & $\bullet$ & & & \\
+$s_{4,5}$ & & & & & & & $\bullet$ & $\bullet$ & $\bullet$ & $\bullet$ & & & \\
+$s_{4,6}$ & & & & & & & & $\bullet$ & $\bullet$ & & $\bullet$ & & \\
+$s_{5,6}$ & & & & & & & & & $\bullet$ & $\bullet$ & $\bullet$ & & \\
+$s_{5,7}$ & & & & & & & & & & $\bullet$ & $\bullet$ & & \\
+$s_{6,7}$ & & & & & & & & & & & $\bullet$ & & \\
+\midrule
+$w_1$    & & & & & & & & & & & & $\bullet$ & \\
+$w_2$    & & & & & & & & & & & & & $\bullet$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Ground state at $(p_1, p_2, p_3, q_3) = (0, 0, 0, 0)$ recovers $P{=}17,\,Q{=}23$ with $E{=}0$.
+
 \end{frame}
 
 
@@ -368,17 +499,96 @@ Only nonzero entries are stored.
 
 \end{frame}
 
+\begin{frame}{Graph-Coloring Simulated Annealing}
 
-\begin{frame}{Time Taken for J construction and CSR DA1}
+In one Metropolis sweep we want to flip many spins in parallel, but two spins coupled by a non-zero $J_{ij}$ share an edge and cannot be flipped simultaneously without invalidating each other's $\Delta E$.
+
+\medskip
+We use graph coloring on the interaction graph (nodes = spins, edges = nonzero $J_{ij}$) partitions spins into colors such that \emph{no two same-color spins are coupled}. All spins in one color can then be flipped in parallel without affecting each other's energy calculations.
+
+\medskip
+\textbf{Two performance bins} based on row degree $d_i = |\{j : J_{ij} \neq 0\}|$:
+\begin{itemize}
+  \item \textbf{Dense} ($d_i \ge 128$): full block of $1024$ threads, shared-memory reduction.
+  \item \textbf{Sparse} ($d_i < 128$): one warp (32 threads) per spin, $32$ spins packed per block, warp-shuffle reduction.
+\end{itemize}
+\end{frame}
+
+\begin{frame}{One-time Setup (Host)}
+
+\begin{algorithm}[H]
+\caption{Pre-processing on host before annealing}
+\begin{algorithmic}[1]
+\Require CSR of symmetric $J$, linear field $h$, num\_spins $N$
+\State Verify $J$ symmetry and a zero diagonal
+\State Bin each spin: \textbf{dense} if $d_i \ge 128$, else \textbf{sparse}
+\State $\textsc{color}[\,] \gets$ Welsh--Powell greedy coloring (largest-degree-first, first-fit)
+\State Build sparse-only CSR with hub-tagged \texttt{col\_idx} (high bit $\Rightarrow$ index into hub cache)
+\State Bucket spins by color: \texttt{color\_dense\_offsets}, \texttt{color\_sparse\_offsets}
+\State Upload all CSR + color tables + hub arrays to GPU
+\State Initialize a random spin configuration and compute initial energy
+\State Calculate the start-temperature: $T_0 = \langle \Delta E^+ \rangle / \ln(1/\chi)$
+\end{algorithmic}
+\end{algorithm}
+
+\end{frame}
+
+\begin{frame}{Annealing Loop (GPU)}
+
+\begin{algorithm}[H]
+\caption{Color-parallel simulated annealing}
+\begin{algorithmic}[1]
+\Require $\beta$-schedule $\{\beta_t\}$ (geometric), sweeps per $\beta$, $N_{\text{colors}}$
+\For{$\beta$ in $\beta$-schedule}
+  \For{sweep $= 1 \ldots m$}
+    \State Generate fresh uniform randoms for all $N$ spins
+    \For{$c = 0 \ldots N_{\text{colors}} - 1$} \Comment{colors run sequentially}
+      \State \textbf{collectFlipCandidates}$\langle$dense$\rangle$ on color $c$ 
+      \State \textbf{collectFlipCandidates}$\langle$sparse$\rangle$ on color $c$
+      \State \quad each spin $i$ in color $c$ \textbf{in parallel}:
+      \State \quad\quad $L_i \gets \sum_j J_{ij}s_j + h_i$, $\Delta E_i \gets -2 s_i L_i$
+      \State \quad\quad if $\text{rand}_i < \min(1, e^{-\beta\Delta E_i})$: append $(i, \Delta E_i)$ to candidates
+      \State \textbf{applyAllFlipsInColor}: flip every accepted spin, atomicAdd $\Delta E_i$ to total energy
+      \State if any hub spin in color $c$: refresh hub-values cache
+    \EndFor
+  \EndFor
+  \If{total energy $<$ best energy} snapshot best spins \EndIf
+\EndFor
+\State \Return best-energy spin configuration
+\end{algorithmic}
+\end{algorithm}
+
+\end{frame}
+
+
+\begin{frame}{GPU Kernel}
+
+    Digital Annealer 1 (DA1) manually launches kernels by assigning specific threads to do the energy calculations. See \href{https://github.com/AdvithDesu/QAP-using-Simulated-Annealing-optimized-for-GPU}{\text{GitHub Link}} for the code used.
+
+    \bigskip
 
     \begin{figure}[htp]
         \centering
-        \includegraphics[width=0.9\textwidth]{bqm variables vs time taken for J construction and DA1.png}
-        \caption{BQM variables vs time taken for J construction and DA1.}
-        \label{fig: bqm variables vs time taken for J construction and DA1.}
+        \includegraphics[width=0.85\textwidth]{GPU Threads.png}
+        \caption{GPU Threads and Thread blocks.}
+        \label{fig: GPU Threads and Thread blocks.}
     \end{figure}
     
 \end{frame}
+
+\begin{frame}{GPU Thread Calculation in DA1}
+
+    Each thread $i$ calculates the local field $L_i = \sum_j J_{ij}s_j + h_i$ and the energy difference is then calculated as $-2 \times s_i \times L_i$ depending on which $i^{\text{th}}$ spin flipped.
+
+    \begin{figure}[htp]
+        \centering
+        \includegraphics[width=0.65\textwidth]{Energy calculation in DA1.png}
+        \caption{Energy calculation in DA1.}
+        \label{fig: Energy calculation in DA1.}
+    \end{figure}
+    
+\end{frame}
+
 
 %========================================
 
@@ -391,53 +601,6 @@ Only nonzero entries are stored.
         \label{fig: bqm variables vs number of densely connected spins.}
     \end{figure}
     
-\end{frame}
-
-\begin{frame}{Number of Non-zero values in J matrix with scale}
-
-    \begin{figure}[htp]
-        \centering
-        \includegraphics[width=0.9\textwidth]{bqm variables vs number of non zero values in J.png}
-        \caption{BQM variables vs number of non zero values in $J_{ij}$.}
-        \label{fig: bqm variables vs number of non zero values in J.}
-    \end{figure}
-    
-\end{frame}
-
-\begin{frame}{Energy and Average Energy difference with scale}
-
-    \begin{figure}[htp]
-        \centering
-        \includegraphics[width=0.9\textwidth]{bqm variables vs absolute energy value and average delta E vales.png}
-        \caption{BQM variables vs absolute energy value and average $\delta E$ values.}
-        \label{fig: bqm variables vs absolute energy value and average delta E values.}
-    \end{figure}
-    
-\end{frame}
-
-\begin{frame}{Trend-lines}
-
-\[
-\text{Number of BQM variables (bqm)} \leq ( \left\lceil log_2{N} \right\rceil )^3
-\]
-
-\[
-\text{Number of non-zero } J_{ij} \text{ elements (nnz)} = 6.08 \times \text{bqm} + 680
-\]
-
-\[
-\text{time} (s) = 4.22 \times10^{-3} \times \text{bqm}
-\]
-
-\bigskip
-
-\begin{itemize}
-
-\item For a 128 bit number (N), it would have approximately 2 million bqm variables, 194 MB to store $J_{ij}$ and would take 2.5 hrs to run on DA1.
-
-\item For a 256 bit number (N), it would have approximately 17 million bqm variables, 1.5 GB to store $J_{ij}$ and would take 19.66 hrs to run on DA1
-
-\end{itemize}
 \end{frame}
 
 \begin{frame}{Annealing Time per Iteration vs Number of Spins}
@@ -463,15 +626,6 @@ Only nonzero entries are stored.
     \begin{figure}
         \centering
         \includegraphics[width=\linewidth]{Execution Time for graph coloring SA.png}
-    \end{figure}
-
-\end{frame}
-
-\begin{frame}{Solution Quality from Graph-Colored Simulated Annealing}
-
-    \begin{figure}
-        \centering
-        \includegraphics[width=1\linewidth]{percentage_difference_predicted_factors.png}
     \end{figure}
 
 \end{frame}
