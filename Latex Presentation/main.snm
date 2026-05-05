@@ -1,0 +1,7 @@
+\beamer@slide {fig: GPU Threads and Thread blocks.}{2}
+\beamer@slide {fig: Energy calculation in DA1.}{3}
+\beamer@slide {fig: Sparsity of J matrix for 162 BQM (Integer 39203).}{14}
+\beamer@slide {fig: bqm variables vs time taken for J construction and DA1.}{16}
+\beamer@slide {fig: bqm variables vs number of densely connected spins.}{17}
+\beamer@slide {fig: bqm variables vs number of non zero values in J.}{18}
+\beamer@slide {fig: bqm variables vs absolute energy value and average delta E values.}{19}
