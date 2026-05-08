@@ -64,8 +64,8 @@
 N = P Q
 \]
 \item Hard inverse problem underlying RSA security.
-\item Idea: map factorization $\rightarrow$ optimization problem.
-\item Solve using annealing-based techniques.
+\item Map factorization $\rightarrow$ QUBO problem.
+\item Solve using annealing-based algorithms.
 \end{itemize}
 \end{frame}
 
@@ -107,6 +107,44 @@ C_i = N_i - \sum_{j} q_j p_{i-j}
 \]
 \item Correct factors satisfy $C_i = 0$.
 \end{itemize}
+\end{frame}
+
+\begin{frame}{Worked Example: $N = 391 = 17 \times 23$}
+
+\textbf{Setup:}
+\begin{itemize}
+  \item $391 = 110000111_2$
+  \item Fixed bits: $p_0 = q_0 = 1$ (odd), $p_4 = q_4 = 1$ (MSB)
+  \item \textbf{Free bits:} $p_1, p_2, p_3$ and $q_1, q_2, q_3$ — 6 unknowns
+\end{itemize}
+
+\medskip
+\textbf{Long multiplication table} (cross-product $p_a q_b$ sits in column $a+b$):
+
+\begin{center}
+\scriptsize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{|c|c|c|c|c|c|c|c|c|c|}
+\hline
+ & $2^8$ & $2^7$ & $2^6$ & $2^5$ & $2^4$ & $2^3$ & $2^2$ & $2^1$ & $2^0$ \\
+\hline
+$P$ &     &     &     &     & 1     & $p_3$ & $p_2$ & $p_1$ & 1     \\
+$Q$ &     &     &     &     & 1     & $q_3$ & $q_2$ & $q_1$ & 1     \\
+\hline
+        &     &     &     &     & 1     & $p_3$ & $p_2$ & $p_1$ & 1 \\
+        &     &     &     & $q_1$ & $p_3 q_1$ & $p_2 q_1$ & $p_1 q_1$ & $q_1$ &  \\
+        &     &     & $q_2$ & $p_3 q_2$ & $p_2 q_2$ & $p_1 q_2$ & $q_2$ &     &     \\
+        &     & $q_3$ & $p_3 q_3$ & $p_2 q_3$ & $p_1 q_3$ & $q_3$ &     &     &     \\
+        & 1   & $p_3$ & $p_2$ & $p_1$ & 1     &     &     &     &     \\
+\hline
+Carry-outs & & $s_{6,7},s_{6,8}$ & $s_{5,6},s_{5,7}$ & $s_{4,5},s_{4,6}$ & $s_{3,4},s_{3,5}$ & $s_{2,3},s_{2,4}$ & $s_{1,2}$ & & \\
+\hline
+$N=391$ & 1 & 1 & 0 & 0 & 0 & 0 & 1 & 1 & 1 \\
+\hline
+\end{tabular}
+\end{center}
+
+Carry $s_{i,j}$ = bit of column $i$'s carry destined for column $j$ (coefficient $2^{j-i}$).
 \end{frame}
 
 \begin{frame}{Energy Function}
@@ -499,6 +537,32 @@ Only nonzero entries are stored.
 
 \end{frame}
 
+\begin{frame}{GPU Kernel}
+
+    \bigskip
+
+    \begin{figure}[htp]
+        \centering
+        \includegraphics[width=0.85\textwidth]{GPU Threads.png}
+        \caption{GPU Threads and Thread blocks.}
+        \label{fig: GPU Threads and Thread blocks.}
+    \end{figure}
+    
+\end{frame}
+
+\begin{frame}{GPU Thread Calculation in DA1}
+
+    Each thread $i$ calculates the local field $L_i = \sum_j J_{ij}s_j + h_i$ and the energy difference is then calculated as $-2 \times s_i \times L_i$ depending on which $i^{\text{th}}$ spin flipped.
+
+    \begin{figure}[htp]
+        \centering
+        \includegraphics[width=0.65\textwidth]{Energy calculation in DA1.png}
+        \caption{Energy calculation in DA1.}
+        \label{fig: Energy calculation in DA1.}
+    \end{figure}
+    
+\end{frame}
+
 \begin{frame}{Graph-Coloring Simulated Annealing}
 
 In one Metropolis sweep we want to flip many spins in parallel, but two spins coupled by a non-zero $J_{ij}$ share an edge and cannot be flipped simultaneously without invalidating each other's $\Delta E$.
@@ -522,7 +586,7 @@ We use graph coloring on the interaction graph (nodes = spins, edges = nonzero $
 \Require CSR of symmetric $J$, linear field $h$, num\_spins $N$
 \State Verify $J$ symmetry and a zero diagonal
 \State Bin each spin: \textbf{dense} if $d_i \ge 128$, else \textbf{sparse}
-\State $\textsc{color}[\,] \gets$ Welsh--Powell greedy coloring (largest-degree-first, first-fit)
+\State $\text{color}[\,] \gets$ Welsh--Powell greedy coloring (largest-degree-first, first-fit)
 \State Build sparse-only CSR with hub-tagged \texttt{col\_idx} (high bit $\Rightarrow$ index into hub cache)
 \State Bucket spins by color: \texttt{color\_dense\_offsets}, \texttt{color\_sparse\_offsets}
 \State Upload all CSR + color tables + hub arrays to GPU
@@ -558,35 +622,6 @@ We use graph coloring on the interaction graph (nodes = spins, edges = nonzero $
 \end{algorithmic}
 \end{algorithm}
 
-\end{frame}
-
-
-\begin{frame}{GPU Kernel}
-
-    Digital Annealer 1 (DA1) manually launches kernels by assigning specific threads to do the energy calculations. See \href{https://github.com/AdvithDesu/QAP-using-Simulated-Annealing-optimized-for-GPU}{\text{GitHub Link}} for the code used.
-
-    \bigskip
-
-    \begin{figure}[htp]
-        \centering
-        \includegraphics[width=0.85\textwidth]{GPU Threads.png}
-        \caption{GPU Threads and Thread blocks.}
-        \label{fig: GPU Threads and Thread blocks.}
-    \end{figure}
-    
-\end{frame}
-
-\begin{frame}{GPU Thread Calculation in DA1}
-
-    Each thread $i$ calculates the local field $L_i = \sum_j J_{ij}s_j + h_i$ and the energy difference is then calculated as $-2 \times s_i \times L_i$ depending on which $i^{\text{th}}$ spin flipped.
-
-    \begin{figure}[htp]
-        \centering
-        \includegraphics[width=0.65\textwidth]{Energy calculation in DA1.png}
-        \caption{Energy calculation in DA1.}
-        \label{fig: Energy calculation in DA1.}
-    \end{figure}
-    
 \end{frame}
 
 
