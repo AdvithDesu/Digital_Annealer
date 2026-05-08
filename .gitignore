@@ -14,3 +14,30 @@ spins_*
 energy_history_*
 __pycache__/
 .DS_Store
+
+# Editor / tool configs
+.vscode/
+.claude/
+
+# LaTeX build artifacts (keep main.pdf tracked)
+*.aux
+*.fdb_latexmk
+*.fls
+*.log
+*.nav
+*.snm
+*.synctex.gz
+*.toc
+*.out
+*.bbl
+*.blg
+*.lof
+*.lot
+*.idx
+*.ind
+*.ilg
+*.glo
+*.gls
+*.acn
+*.acr
+*.alg
