@@ -109,44 +109,6 @@ C_i = N_i - \sum_{j} q_j p_{i-j}
 \end{itemize}
 \end{frame}
 
-\begin{frame}{Worked Example: $N = 391 = 17 \times 23$}
-
-\textbf{Setup:}
-\begin{itemize}
-  \item $391 = 110000111_2$
-  \item Fixed bits: $p_0 = q_0 = 1$ (odd), $p_4 = q_4 = 1$ (MSB)
-  \item \textbf{Free bits:} $p_1, p_2, p_3$ and $q_1, q_2, q_3$ — 6 unknowns
-\end{itemize}
-
-\medskip
-\textbf{Long multiplication table} (cross-product $p_a q_b$ sits in column $a+b$):
-
-\begin{center}
-\scriptsize
-\setlength{\tabcolsep}{4pt}
-\begin{tabular}{|c|c|c|c|c|c|c|c|c|c|}
-\hline
- & $2^8$ & $2^7$ & $2^6$ & $2^5$ & $2^4$ & $2^3$ & $2^2$ & $2^1$ & $2^0$ \\
-\hline
-$P$ &     &     &     &     & 1     & $p_3$ & $p_2$ & $p_1$ & 1     \\
-$Q$ &     &     &     &     & 1     & $q_3$ & $q_2$ & $q_1$ & 1     \\
-\hline
-        &     &     &     &     & 1     & $p_3$ & $p_2$ & $p_1$ & 1 \\
-        &     &     &     & $q_1$ & $p_3 q_1$ & $p_2 q_1$ & $p_1 q_1$ & $q_1$ &  \\
-        &     &     & $q_2$ & $p_3 q_2$ & $p_2 q_2$ & $p_1 q_2$ & $q_2$ &     &     \\
-        &     & $q_3$ & $p_3 q_3$ & $p_2 q_3$ & $p_1 q_3$ & $q_3$ &     &     &     \\
-        & 1   & $p_3$ & $p_2$ & $p_1$ & 1     &     &     &     &     \\
-\hline
-Carry-outs & & $s_{6,7},s_{6,8}$ & $s_{5,6},s_{5,7}$ & $s_{4,5},s_{4,6}$ & $s_{3,4},s_{3,5}$ & $s_{2,3},s_{2,4}$ & $s_{1,2}$ & & \\
-\hline
-$N=391$ & 1 & 1 & 0 & 0 & 0 & 0 & 1 & 1 & 1 \\
-\hline
-\end{tabular}
-\end{center}
-
-Carry $s_{i,j}$ = bit of column $i$'s carry destined for column $j$ (coefficient $2^{j-i}$).
-\end{frame}
-
 \begin{frame}{Energy Function}
 Optimization objective:
 \[
@@ -250,29 +212,6 @@ x_1 + x_2 = 1 \quad\Longrightarrow\quad x_2 = 1 - x_1, \quad x_1 x_2 = 0.
 \textbf{Use in factorization:} eliminates one variable outright (substitute $x_2 \to 1-x_1$) and kills any quadratic term $x_1 x_2$ that appears in a column clause.
 \end{frame}
 
-\begin{frame}{Rule 6: Complementary Pair Rule}
-For a constraint $\sum_i c_i x_i + C = 0$ with $S_+, S_-$ as before:
-
-\smallskip
-\textbf{Two positive coefficients} $c_i, c_j > 0$:
-\[
-c_i + c_j > S_- - C \quad\text{and}\quad c_i + c_j > S_+ + C
-\]
-\[
-\Longrightarrow\quad x_j = 1 - x_i.
-\]
-
-\textbf{Two negative coefficients} $c_i, c_j < 0$ (let $\bar c = |c|$):
-\[
-\bar c_i + \bar c_j > S_+ + C \quad\text{and}\quad \bar c_i + \bar c_j > S_- - C
-\]
-\[
-\Longrightarrow\quad x_j = 1 - x_i.
-\]
-
-\textbf{Why:} the first inequality forbids both variables from being $1$ simultaneously; the second forbids both from being $0$. The only remaining option is one of each.
-\end{frame}
-
 \begin{frame}{Parity Rule}
 Both sides of a clause must have the same parity:
 \begin{align*}
@@ -312,7 +251,7 @@ x^m = x, \quad m = 2, 3, \dots
 \textbf{Setup:}
 \begin{itemize}
   \item $391 = 110000111_2$
-  \item Fixed bits: $p_0 = q_0 = 1$ (odd), $p_4 = q_4 = 1$ (MSB)
+  \item \textbf{Fixed bits:} $p_0 = q_0 = 1$ (odd), $p_4 = q_4 = 1$ (MSB)
   \item \textbf{Free bits:} $p_1, p_2, p_3$ and $q_1, q_2, q_3$ — 6 unknowns
 \end{itemize}
 
@@ -322,6 +261,7 @@ x^m = x, \quad m = 2, 3, \dots
 \begin{center}
 \scriptsize
 \setlength{\tabcolsep}{4pt}
+\renewcommand{\arraystretch}{1.4}
 \begin{tabular}{|c|c|c|c|c|c|c|c|c|c|}
 \hline
  & $2^8$ & $2^7$ & $2^6$ & $2^5$ & $2^4$ & $2^3$ & $2^2$ & $2^1$ & $2^0$ \\
@@ -335,14 +275,16 @@ $Q$ &     &     &     &     & 1     & $q_3$ & $q_2$ & $q_1$ & 1     \\
         &     & $q_3$ & $p_3 q_3$ & $p_2 q_3$ & $p_1 q_3$ & $q_3$ &     &     &     \\
         & 1   & $p_3$ & $p_2$ & $p_1$ & 1     &     &     &     &     \\
 \hline
-Carry-outs & & $s_{6,7},s_{6,8}$ & $s_{5,6},s_{5,7}$ & $s_{4,5},s_{4,6}$ & $s_{3,4},s_{3,5}$ & $s_{2,3},s_{2,4}$ & $s_{1,2}$ & & \\
+Carry-ins  & $s_{6,8},s_{7,8}$ & $s_{5,7},s_{6,7}$ & $s_{4,6},s_{5,6}$ & $s_{3,5},s_{4,5}$ & $s_{2,4},s_{3,4}$ & $s_{2,3}$ & $s_{1,2}$ & & \\
 \hline
-$N=391$ & 1 & 1 & 0 & 0 & 0 & 0 & 1 & 1 & 1 \\
+Carry-outs & & $s_{7,8}$ & $s_{6,7},s_{6,8}$ & $s_{5,6},s_{5,7}$ & $s_{4,5},s_{4,6}$ & $s_{3,4},s_{3,5}$ & $s_{2,3},s_{2,4}$ & $s_{1,2}$ & \\
+\hline
+$N=391$ & \textbf{1} & \textbf{1} & \textbf{0} & \textbf{0} & \textbf{0} & \textbf{0} & \textbf{1} & \textbf{1} & \textbf{1} \\
 \hline
 \end{tabular}
 \end{center}
 
-Carry $s_{i,j}$ = bit of column $i$'s carry destined for column $j$ (coefficient $2^{j-i}$).
+Carry $s_{i,j}$ = bit of column $i$'s carry destined for column $j$ (coefficient $2^{j-i}$). In each $C_k$, positive-sign carries enter column $k$ (\textbf{carry-ins}); negative-sign carries with weights $2,4,\dots$ leave column $k$ (\textbf{carry-outs}).
 \end{frame}
 
 \begin{frame}{Column Clauses: $C_i = 0$}
@@ -455,18 +397,7 @@ Auxiliary (2) & $w_1 = p_1 p_2,\ w_2 = p_1 p_3$ \\
 \begin{frame}{QUBO Matrix Structure}
 \small
 
-QUBO form: $H = \sum_i h_i x_i + \sum_{i<j} Q_{ij} x_i x_j + \text{const}$.
-
-\medskip
-\textbf{Example: contribution of $C_1^2$ before $C_1$ was eliminated} (illustrative pattern):
-\[
-C_1^2 = (p_1 + q_1 - 1 - 2 s_{1,2})^2
-\xrightarrow{x^2 = x}
--p_1 - q_1 + 8 s_{1,2} + 2 p_1 q_1 - 4 p_1 s_{1,2} - 4 q_1 s_{1,2} + 1.
-\]
-
-\medskip
-\textbf{Sketch of nonzero entries} of $Q$ for $N=391$ (qualitative):
+\textbf{Sketch of nonzero entries} of $Q$ for $N=391$ (after pre-processing and quadrization):
 
 \begin{center}
 \scriptsize
@@ -493,18 +424,46 @@ $w_2$    & & & & & & & & & & & & & $\bullet$ \\
 \end{tabular}
 \end{center}
 
-Ground state at $(p_1, p_2, p_3, q_3) = (0, 0, 0, 0)$ recovers $P{=}17,\,Q{=}23$ with $E{=}0$.
+The ground state of this QUBO recovers $P{=}17,\,Q{=}23$ with $E{=}0$.
+
+\end{frame}
+
+%====================================================
+\section{From QUBO to Ising}
+%====================================================
+
+\begin{frame}{QUBO $\rightarrow$ Ising Conversion}
+
+QUBO uses $x_i \in \{0,1\}$; Ising-form annealers (D-Wave, our GPU SA) use spins $\sigma_i \in \{-1,+1\}$.
+
+\medskip
+\textbf{Linear change of variables:}
+\[
+\sigma_i = 1 - 2 x_i \qquad\Longleftrightarrow\qquad x_i = \tfrac{1 - \sigma_i}{2}.
+\]
+
+\medskip
+Substitute into the QUBO $H = \sum_i Q_{ii}\,x_i + \sum_{i<j} Q_{ij}\,x_i x_j$ and collect terms:
+\[
+H(\boldsymbol\sigma) = \underbrace{\sum_i h_i \sigma_i}_{\text{linear field}} \;+\; \underbrace{\sum_{i<j} J_{ij}\,\sigma_i \sigma_j}_{\text{couplings}} \;+\; \text{const}.
+\]
+
+\textbf{Coefficients} (treating $Q$ symmetrically so $Q_{ij}=Q_{ji}$ for $i\neq j$):
+\[
+\boxed{\,J_{ij} = \tfrac{1}{4} Q_{ij}\,},\qquad
+\boxed{\,h_i = -\tfrac{1}{2} Q_{ii} \;-\; \tfrac{1}{4}\sum_{j\neq i} Q_{ij}\,}.
+\]
 
 \end{frame}
 
 
-\begin{frame}[allowframebreaks]{J matrix Visualization}
+\begin{frame}{J matrix Visualization}
 
     \begin{figure}[htp]
         \centering
         \includegraphics[width=0.62\textwidth]{Sparsity of J matrix for 162 BQM.png}
         \caption{Sparsity of J matrix for 162 BQM  (Integer 39203).}
-        \label{fig: Sparsity of J matrix for 162 BQM (Integer 39203).}
+        \label{fig: Sparsity of J matrix for 162 spins (Integer 39203).}
     \end{figure}
     
 \end{frame}
@@ -533,7 +492,57 @@ Store \emph{only the nonzero couplings} using
 Only nonzero entries are stored.
 
 \vspace{0.2cm}
-\textbf{Memory cost:} $\mathcal{O}(N + \text{nnz})$ instead of $\mathcal{O}(N^2)$
+\textbf{Memory cost:} $\mathcal{O}(N + \text{nnz})$ instead of $\mathcal{O}(N^2)$ (nnz = number of nonzeros).
+
+\end{frame}
+
+\begin{frame}{CSR Example}
+
+Consider a symmetric $5 \times 5$ coupling matrix with $8$ non-zero entries (out of $25$):
+
+\medskip
+\begin{minipage}{0.42\textwidth}
+\centering
+\[
+J =
+\begin{pmatrix}
+\cdot &  2  & \cdot & \cdot & -1 \\
+ 2  & \cdot & \cdot &  3  & \cdot \\
+\cdot & \cdot & \cdot & \cdot &  4  \\
+\cdot &  3  & \cdot & \cdot & \cdot \\
+-1  & \cdot &  4  & \cdot & \cdot
+\end{pmatrix}
+\]
+{\scriptsize ($\cdot$ denotes a stored zero — not represented in CSR)}
+\end{minipage}%
+\hfill
+\begin{minipage}{0.55\textwidth}
+\textbf{CSR representation:}
+
+\smallskip
+\scriptsize
+\setlength{\tabcolsep}{4pt}
+\renewcommand{\arraystretch}{1.3}
+\begin{tabular}{l|*{9}{c}}
+index               & 0 & 1 & 2 & 3 & 4 & 5 & 6 & 7 & \\
+\hline
+\texttt{col\_idx} & 1 & 4 & 0 & 3 & 4 & 1 & 0 & 2 & \\
+\texttt{values}   & 2 & -1 & 2 & 3 & 4 & 3 & -1 & 4 & \\
+\end{tabular}
+
+\medskip
+\begin{tabular}{l|*{6}{c}}
+index              & 0 & 1 & 2 & 3 & 4 & 5 \\
+\hline
+\texttt{row\_ptr}[i] & 0 & 2 & 4 & 5 & 6 & 8 \\
+\end{tabular}
+\end{minipage}
+
+\medskip
+\textbf{Reading row $i$:} entries in row\_ptr[i] represent the start of the $i^{\text{th}}$ row in the J values array. Entries are stored at indices $\texttt{row\_ptr}[i] \dots \texttt{row\_ptr}[i{+}1]{-}1$ of the column index.
+
+\vspace{0.2cm}
+\textbf{Memory cost:} $\mathcal{O}(N + \text{nnz})$ instead of $\mathcal{O}(N^2)$ (nnz = number of nonzeros).
 
 \end{frame}
 
@@ -578,7 +587,7 @@ We use graph coloring on the interaction graph (nodes = spins, edges = nonzero $
 \end{itemize}
 \end{frame}
 
-\begin{frame}{One-time Setup (Host)}
+\begin{frame}{One-time Setup}
 
 \begin{algorithm}[H]
 \caption{Pre-processing on host before annealing}
