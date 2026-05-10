@@ -462,7 +462,7 @@ H(\boldsymbol\sigma) = \underbrace{\sum_i h_i \sigma_i}_{\text{linear field}} \;
     \begin{figure}[htp]
         \centering
         \includegraphics[width=0.62\textwidth]{Sparsity of J matrix for 162 BQM.png}
-        \caption{Sparsity of J matrix for 162 BQM  (Integer 39203).}
+        \caption{Sparsity of J matrix for 162 spins  (Integer 39203).}
         \label{fig: Sparsity of J matrix for 162 spins (Integer 39203).}
     \end{figure}
     
@@ -596,11 +596,10 @@ We use graph coloring on the interaction graph (nodes = spins, edges = nonzero $
 \State Verify $J$ symmetry and a zero diagonal
 \State Bin each spin: \textbf{dense} if $d_i \ge 128$, else \textbf{sparse}
 \State $\text{color}[\,] \gets$ Welsh--Powell greedy coloring (largest-degree-first, first-fit)
-\State Build sparse-only CSR with hub-tagged \texttt{col\_idx} (high bit $\Rightarrow$ index into hub cache)
 \State Bucket spins by color: \texttt{color\_dense\_offsets}, \texttt{color\_sparse\_offsets}
 \State Upload all CSR + color tables + hub arrays to GPU
 \State Initialize a random spin configuration and compute initial energy
-\State Calculate the start-temperature: $T_0 = \langle \Delta E^+ \rangle / \ln(1/\chi)$
+\State Calculate the start-temperature: $T_0 = \langle \Delta E^+ \rangle / \ln(1/\chi)$ \newline ($\chi$ = target acceptance rate)
 \end{algorithmic}
 \end{algorithm}
 
@@ -656,20 +655,11 @@ We use graph coloring on the interaction graph (nodes = spins, edges = nonzero $
 
 \end{frame}
 
-\begin{frame}{Construction time for CSR J}
+\begin{frame}{Time Taken for Construction and Annealing}
 
     \begin{figure}
         \centering
-        \includegraphics[width=\linewidth]{csr_construction_python_vs_cpp.png}
-    \end{figure}
-
-\end{frame}
-
-\begin{frame}{Execution Time Comparison}
-
-    \begin{figure}
-        \centering
-        \includegraphics[width=\linewidth]{Execution Time for graph coloring SA.png}
+        \includegraphics[width=\linewidth]{Construction and Annealing Time.png}
     \end{figure}
 
 \end{frame}
