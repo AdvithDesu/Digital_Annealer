@@ -102,8 +102,9 @@ for BITS in "${BITS_LIST[@]}"; do
     read -r NUM_SPINS NNZ MEAN_DEG MAX_DEG ADAPTIVE_THRESH NUM_DENSE NUM_SPARSE FRAC_DENSE < <(python3 - <<PYEOF
 import math
 
+import re
 with open("$ROW_PTR_FILE") as f:
-    rp = list(map(int, f.read().split(',')))
+    rp = list(map(int, re.split(r'[,\s]+', f.read().strip())))
 
 n   = len(rp) - 1
 nnz = rp[-1]
