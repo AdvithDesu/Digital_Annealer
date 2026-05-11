@@ -42,8 +42,8 @@
 % Title and author information
 \title{Integer Factorization as an Ising problem}
 % \subtitle{Optional Subtitle}
-\author{Advith Desu}
-\institute{IIT Madras}
+\author{Anil Prabhakar, Advith Desu, Aryan Namboodri}
+\institute{Indian Institute of Technology Madras}
 \date{\today}
 
 \begin{document}
@@ -65,7 +65,7 @@
 N = P Q
 \]
 \item Hard inverse problem underlying RSA security.
-\item Map factorization $\rightarrow$ QUBO problem.
+\item Map factorization $\rightarrow$ QUBO (or Ising) problem.
 \item Solve using annealing-based algorithms.
 \end{itemize}
 \end{frame}
@@ -663,6 +663,8 @@ We use graph coloring on the interaction graph (nodes = spins, edges = nonzero $
         \includegraphics[width=\linewidth]{Construction and Annealing Time.png}
     \end{figure}
 
+    Each Annealing run consists of 10 sweeps at each temperature step, with the starting temperature $T_0$ calculated to give an initial acceptance rate of 0.5, and a geometric cooling schedule with factor 0.95 until $T < 10^{-3}$.
+
 \end{frame}
 
 \begin{frame}{Solution Quality Measured by Gap between Real and Estimated P}
@@ -811,21 +813,51 @@ N \;=\; 416\,749\,328\,744\,899\,275\,664\,046\,210\,629
 
 \begin{frame}{Future Work}
 
-\textbf{Better classical post-processing.} Brute-force trial division is the simplest way to consume the annealer's guess $(P_{\text{pred}}, Q_{\text{pred}})$, but it makes almost no use of the prediction beyond using it as a starting point. The annealer hands us a rich piece of information — an approximate factor of $N$ — and existing classical factorization techniques may be able to exploit this kind of partial information far more effectively than a linear scan. Exploring such methods is a natural next step.
+\textbf{Better classical post-processing.} Brute-force trial division is the simplest way to consume the annealer's guess $(P_{\text{pred}}, Q_{\text{pred}})$, but it makes almost no use of the prediction beyond using it as a starting point. Other Existing classical factorization methods may be able to exploit this kind of information far more effectively than a linear scan. Exploring such methods would be a natural next step.
 
 \medskip
-\textbf{The real bottleneck: annealer solution quality.} From the brute-force timing model
+\textbf{The Bottleneck}, from the brute-force timing model
 \[
 \text{Time}(\text{s}) \;=\; \frac{3.32 \times 10^{-9}}{\text{threads}} \,\times\, \text{Gap}(\%) \,\times\, 2^n,
 \]
-two levers control the total cost:
+
 \begin{itemize}
-  \item \textbf{Threads:} linear scaling — pure compute throw. Useful but bounded by hardware.
-  \item \textbf{Gap (\%):} a multiplicative factor in front of $2^n$. Since $2^n$ grows exponentially with bit-length, \emph{shrinking the gap is the only lever that can keep up} with larger $N$.
+  \item \textbf{Threads:} This is the amount of 'compute' we can throw at the problem. Would be helpful, but its bounded by hardware.
+  \item \textbf{Gap (\%):} a multiplicative factor in front of $2^n$. Since $2^n$ grows exponentially with bit-length, \emph{shrinking the gap helps us keep up} with larger $N$.
 \end{itemize}
 
 \medskip
-\textbf{Therefore the highest-impact direction is improving the annealer:} tighter QUBO encodings, larger neighborhoods, better cooling schedules, parallel-tempering or population annealing on top of the GPU SA — anything that drives $P_{\text{pred}}$ closer to $P$ and chips away at $\text{Gap}(\%)$.
+\textbf The next step would be to improve the solution quality from the annealer by exploring better QUBO encodings, and any other optimizations that drives $P_{\text{pred}}$ closer to $P$ and chips away at the $\text{Gap}(\%)$.
+
+\end{frame}
+
+%====================================================
+\section{References}
+%====================================================
+
+\begin{frame}{References}
+\small
+\begin{thebibliography}{9}
+
+\bibitem{wang2020}
+B.~Wang, F.~Hu, H.~Yao, and C.~Wang,
+``Prime factorization algorithm based on parameter optimization of Ising model,''
+\emph{Scientific Reports}, vol.~10, no.~1, 2020.
+DOI: \href{https://doi.org/10.1038/s41598-020-62802-5}{10.1038/s41598-020-62802-5}.
+
+\bibitem{jiang2018}
+S.~Jiang, K.~A. Britt, A.~J. McCaskey, T.~S. Humble, and S.~Kais,
+``Quantum Annealing for Prime Factorization,''
+\emph{Scientific Reports}, vol.~8, no.~1, 2018.
+DOI: \href{https://doi.org/10.1038/s41598-018-36058-z}{10.1038/s41598-018-36058-z}.
+
+\bibitem{preis2009}
+T.~Preis, P.~Virnau, W.~Paul, and J.~J. Schneider,
+``GPU accelerated Monte Carlo simulation of the 2D and 3D Ising model,''
+\emph{Journal of Computational Physics}, vol.~228, no.~12, pp.~4468--4477, 2009.
+DOI: \href{https://doi.org/10.1016/j.jcp.2009.03.018}{10.1016/j.jcp.2009.03.018}.
+
+\end{thebibliography}
 
 \end{frame}
 
