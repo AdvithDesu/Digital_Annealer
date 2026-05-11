@@ -29,6 +29,11 @@
 
 set -euo pipefail
 
+# ── Always run from repo root so existing relative paths keep working ──
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$REPO_ROOT"
+
 # ── Binaries ──────────────────────────────────────────────────
 QUBO_BIN="./QUBO_Construction/qubo_factorization"
 SA_BIN="./build/annealer_gpu_SI/annealer_gpu_SI"

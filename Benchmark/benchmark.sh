@@ -20,6 +20,11 @@
 
 set -u
 
+# ── Always run from repo root so existing relative paths keep working ──
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$REPO_ROOT"
+
 # ── SA defaults (overridable via CLI) ────────────────────────
 START_TEMP="auto"        # "auto" -> Ben-Ameur estimation in CUDA SA
 STOP_TEMP=1e-8
@@ -84,7 +89,7 @@ for BITS in "${BITS_LIST[@]}"; do
 
     echo "===== bits=$BITS  P=$P  Q=$Q  N=$N ====="
 
-    LOG=$(./factorize.sh -p "$P" -q "$Q" \
+    LOG=$(./Factorize/factorize.sh -p "$P" -q "$Q" \
             -x "$START_TEMP" -y "$STOP_TEMP" -c "$ALPHA" -m "$SWEEPS" \
             --auto-accept-rate "$ACCEPT_RATE" 2>&1)
     rc=$?

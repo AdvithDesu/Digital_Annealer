@@ -4,7 +4,7 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SRC="$SCRIPT_DIR/Bruteforce.cpp"
 BIN="$SCRIPT_DIR/Bruteforce"
-CSV="$SCRIPT_DIR/benchmark_results.csv"
+CSV="$SCRIPT_DIR/../benchmark_results.csv"
 
 # Compile if binary is missing or source is newer
 if [ ! -x "$BIN" ] || [ "$SRC" -nt "$BIN" ]; then
