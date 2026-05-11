@@ -21,6 +21,11 @@
 
 set -euo pipefail
 
+# ── Always run from repo root so existing relative paths keep working ──
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$REPO_ROOT"
+
 BINARY="./build/annealer_gpu_SI/annealer_gpu_SI"
 DIR="bin_SI"
 RESULTS_DIR="results"

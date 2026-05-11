@@ -1,6 +1,11 @@
 #!/bin/bash
 # Run CUDA SA for all numbers in bin_SI and collect timing into a single file.
 
+# ── Always run from repo root so existing relative paths keep working ──
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$REPO_ROOT"
+
 BINARY="bin_SI/annealer_gpu_SI"
 DIR="bin_SI"
 OUT="timing_results_cuda.txt"

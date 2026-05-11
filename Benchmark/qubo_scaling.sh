@@ -15,6 +15,11 @@
 
 set -u
 
+# ── Always run from repo root so existing relative paths keep working ──
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$REPO_ROOT"
+
 # ── Defaults ─────────────────────────────────────────────────
 BITS_LIST=()
 for b in $(seq 8 2 62); do BITS_LIST+=("$b"); done
