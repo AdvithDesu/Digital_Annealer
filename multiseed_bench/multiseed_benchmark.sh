@@ -55,7 +55,7 @@ for b in $(seq 8 2 62); do BITS_LIST+=("$b"); done
 
 # ── Binaries / paths (relative to REPO_ROOT, which is the cwd) ───────
 QUBO_BIN="./QUBO_Construction/qubo_factorization"
-SA_BIN="./build/annealer_gpu_SI/annealer_gpu_SI"
+SA_BIN="./build/Simulated Annealing/annealer_gpu_SI"
 QUBO_SRC="QUBO_Construction/QUBO_Integer_Factorization.cpp"
 CSR_DIR="bin_SI"
 META_DIR="qubo_metadata"

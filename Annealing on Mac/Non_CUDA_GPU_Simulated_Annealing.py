@@ -2,7 +2,7 @@
 """
 GPU-accelerated Simulated Annealing for Ising ground-state search.
 
-Python port of optimized_main_single_flip.cu -- runs on Mac (MPS) or
+Python port of Graph_Colored_SA.cu -- runs on Mac (MPS) or
 CUDA GPUs. Uses PyTorch for GPU acceleration.
 
 The J matrix is kept in CSR form throughout. The per-spin neighbour sum

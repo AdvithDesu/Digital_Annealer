@@ -4,7 +4,7 @@ This repo contains code to find the configuration of the spins such that Ising H
 ## Code Structure
 This repo contains 
 
-	- annealer_gpu_SI
+	- Simulated Annealing
 	- bin_SI
 	- build(generated later)
 	- anneal.cmd

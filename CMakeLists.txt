@@ -16,4 +16,4 @@ find_package(CUDALibs REQUIRED)
 
 add_subdirectory(compiler_info)
 
-add_subdirectory(annealer_gpu_SI)
+add_subdirectory("Simulated Annealing")

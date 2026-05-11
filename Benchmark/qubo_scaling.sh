@@ -41,7 +41,7 @@ QUBO_BIN="./QUBO_Construction/qubo_factorization"
 QUBO_SRC="QUBO_Construction/QUBO_Integer_Factorization.cpp"
 CSR_DIR="bin_SI"
 META_DIR="qubo_metadata"
-MAX_HUB_SPINS=256     # must match #define MAX_HUB_SPINS in optimized_main_single_flip.cu
+MAX_HUB_SPINS=256     # must match #define MAX_HUB_SPINS in Graph_Colored_SA.cu
 # DENSE_THRESHOLD is computed adaptively per problem (see Python block below)
 
 # ── Build QUBO binary if needed ──────────────────────────────

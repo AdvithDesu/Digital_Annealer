@@ -36,7 +36,7 @@ cd "$REPO_ROOT"
 
 # ── Binaries ──────────────────────────────────────────────────
 QUBO_BIN="./QUBO_Construction/qubo_factorization"
-SA_BIN="./build/annealer_gpu_SI/annealer_gpu_SI"
+SA_BIN="./build/Simulated Annealing/annealer_gpu_SI"
 
 # ── Directories ───────────────────────────────────────────────
 CSR_DIR="bin_SI"
