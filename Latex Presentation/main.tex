@@ -50,6 +50,14 @@
 
 % Title slide
 \begin{frame}
+    \begin{tikzpicture}[remember picture, overlay]
+        \node[anchor=north west, xshift=0.6cm, yshift=-0.4cm]
+            at (current page.north west)
+            {\includegraphics[height=1.3cm]{iitm_logo.png}};
+        \node[anchor=north east, xshift=-0.6cm, yshift=-0.4cm]
+            at (current page.north east)
+            {\includegraphics[height=1.6cm]{cquicc_logo.png}};
+    \end{tikzpicture}
     \titlepage
 \end{frame}
 
