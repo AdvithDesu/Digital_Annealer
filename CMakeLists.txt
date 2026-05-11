@@ -14,6 +14,4 @@ list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake/Modules)
 
 find_package(CUDALibs REQUIRED)
 
-add_subdirectory(compiler_info)
-
 add_subdirectory("Simulated Annealing")
