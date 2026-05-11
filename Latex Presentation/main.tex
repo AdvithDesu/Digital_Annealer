@@ -17,6 +17,7 @@
 
 \usepackage{pgfplots}
 \pgfplotsset{compat=1.18}
+\usetikzlibrary{positioning,arrows.meta}
 
 \usepackage{algorithm}
 \usepackage{algpseudocode}
@@ -587,10 +588,21 @@ We use graph coloring on the interaction graph (nodes = spins, edges = nonzero $
 \end{itemize}
 \end{frame}
 
+\begin{frame}{Number of Total and Densely Connected Spins with Scale}
+
+    \begin{figure}[htp]
+        \centering
+        \includegraphics[width=0.9\textwidth]{bqm variables vs number of densely connected spins.png}
+        \caption{Number of bits in N vs number of densely connected spins.}
+        \label{fig: bqm variables vs number of densely connected spins.}
+    \end{figure}
+    
+\end{frame}
+
 \begin{frame}{One-time Setup}
 
 \begin{algorithm}[H]
-\caption{Pre-processing on host before annealing}
+\caption{Pre-processing steps before annealing}
 \begin{algorithmic}[1]
 \Require CSR of symmetric $J$, linear field $h$, num\_spins $N$
 \State Verify $J$ symmetry and a zero diagonal
@@ -635,17 +647,6 @@ We use graph coloring on the interaction graph (nodes = spins, edges = nonzero $
 
 %========================================
 
-\begin{frame}{Number of Densely connected spins with scale}
-
-    \begin{figure}[htp]
-        \centering
-        \includegraphics[width=0.9\textwidth]{bqm variables vs number of densely connected spins.png}
-        \caption{BQM variables vs number of densely connected spins.}
-        \label{fig: bqm variables vs number of densely connected spins.}
-    \end{figure}
-    
-\end{frame}
-
 \begin{frame}{Annealing Time per Iteration vs Number of Spins}
 
     \begin{figure}
@@ -679,6 +680,76 @@ We use graph coloring on the interaction graph (nodes = spins, edges = nonzero $
 
 \end{frame}
 
+%====================================================
+\section{Brute-force Search}
+%====================================================
+
+\begin{frame}{Brute-force Search}
+
+The annealer returns approximate factors $P_{\text{pred}}, Q_{\text{pred}}$ — usually off by a few percent. A brute-force search around this prediction finds the exact factor.
+
+\medskip
+\textbf{Best starting estimate} — average of two independent guesses for $P$:
+\[
+P_{\text{centre}} \;=\; \tfrac{1}{2}\bigl(P_{\text{pred}} + \lfloor N / Q_{\text{pred}} \rfloor\bigr).
+\]
+
+\medskip
+\textbf{Outward spiral:} test candidates closest to $P_{\text{centre}}$ first, alternating above and below until the exact factor is found.
+
+\medskip
+Candidates are grouped into chunks of $C$. Even chunks spiral upward (steps up), odd chunks spiral downward (steps down). Threads claim the next chunk via an atomic counter, so the search is partially parallel.
+
+\medskip
+\textbf{Stop condition:} the first thread to find $p \mid N$ sets a shared flag; the rest exit at the next iteration.
+
+\end{frame}
+
+\begin{frame}{Brute-force Optimizations}
+
+Testing all numbers in a chunk is ineffecient as we can filter out many candidates without a divisibility test using a wheel sieve cheaply. The wheel sieve eliminates candidates that are divisible by small primes.
+
+\medskip
+\textbf{Wheel Sieve:}
+\begin{itemize}
+  \item Any $p$ divisible by $2, 3, 5, 7,$ or $11$ cannot be the (odd, $\ge 13$) prime factor.
+  \item Using a Wheel sieve skips approximately 79\% of candidates without a divisibility test.
+\end{itemize}
+
+\medskip
+\textbf{Early termination:} atomic \texttt{stop} flag checked at each chunk boundary; all $T$ threads exit within one chunk of the discovery.
+
+\end{frame}
+
+\begin{frame}{Brute-force Algorithm}
+
+\begin{algorithm}[H]
+\caption{Parallel spiral divisor search}
+\begin{algorithmic}[1]
+\Require $N,\ P_{\text{pred}},\ Q_{\text{pred}},\ T$ threads
+\State $P_{\text{centre}} \gets \tfrac{1}{2}(P_{\text{pred}} + \lfloor N/Q_{\text{pred}} \rfloor)$
+\State \textbf{shared:} atomic \texttt{chunk\_idx} $\gets 0$, atomic \texttt{stop} $\gets$ false, atomic \texttt{found} $\gets 0$
+\medskip
+\For{each thread \textbf{in parallel}}
+  \While{\textbf{not} \texttt{stop}}
+    \State $k \gets$ \texttt{chunk\_idx.fetchAdd(1)} \Comment{claim next chunk}
+    \If{$k$ even} \Comment{step up}
+      \State $[\text{lo},\text{hi}] \gets [P_{\text{centre}} + \tfrac{k}{2}C,\ P_{\text{centre}} + (\tfrac{k}{2}{+}1)C - 1]$
+    \Else \Comment{step down}
+      \State $[\text{lo},\text{hi}] \gets [P_{\text{centre}} - \tfrac{k{+}1}{2}C,\ P_{\text{centre}} - \tfrac{k{-}1}{2}C - 1]$
+    \EndIf
+    \For{each $p \in [\text{lo}, \text{hi}]$ passing the wheel sieve}
+      \If{$N \bmod p = 0$}
+        \State \texttt{found} $\gets p$;\ \texttt{stop} $\gets$ true;\ \textbf{return}
+      \EndIf
+    \EndFor
+  \EndWhile
+\EndFor
+\State \Return $P \gets$ \texttt{found},\ \ $Q \gets N / P$
+\end{algorithmic}
+\end{algorithm}
+\end{frame}
+
 \begin{frame}{Time Taken to Find Exact primes by Brute Force}
 
     \begin{figure}
@@ -690,253 +761,73 @@ We use graph coloring on the interaction graph (nodes = spins, edges = nonzero $
 
 \end{frame}
 
+\begin{frame}{End-to-End Run: $\sim$100-bit Semiprime}
 
+\[
+N \;=\; 416\,749\,328\,744\,899\,275\,664\,046\,210\,629
+\]
 
-% \begin{frame}[allowframebreaks]{Normalized Energy value statistics}
+\bigskip
+\begin{center}
+\begin{tikzpicture}[
+  node distance=4mm,
+  box/.style={draw, rounded corners, minimum width=4.6cm, minimum height=0.7cm,
+              align=center, font=\footnotesize},
+  total/.style={draw, rounded corners, minimum width=4.6cm, minimum height=0.85cm,
+                align=center, font=\footnotesize\bfseries, fill=red!12, draw=red!60},
+  hdr/.style={font=\small\bfseries},
+  arr/.style={-{Latex[length=2mm]}, thick}
+]
+% ===== Left column: annealing pipeline =====
+\node[hdr] (lh) {Annealing-guided pipeline};
+\node[box, below=2mm of lh]   (l1) {Build $J$ matrix (CSR) \\ \textbf{25.3 s}};
+\node[box, below=of l1]       (l2) {Simulated annealing \\ (auto $T_0$, $\alpha = 0.95$) \\ \textbf{122.8 s}};
+\node[box, below=of l2]       (l3) {Brute-force from \\ $P_{\text{centre}} = 5.79\!\times\!10^{14}$ \\ \textbf{267.9 s}};
+\node[total, below=of l3]     (l4) {Total: \textbf{416.0 s}};
+\draw[arr] (l1) -- (l2);
+\draw[arr] (l2) -- (l3);
+\draw[arr] (l3) -- (l4);
 
-% \begin{table}[h]
-% \centering
-% \begin{tabular}{l c}
-% \hline
-% Statistic & Normalized Energy \\
-% \hline
-% Best (max)   & 0.99993952 \\
-% Worst (min) & 0.83004852 \\
-% Mean        & 0.94595608 \\
-% Median      & 0.96233060 \\
-% Std. dev.   & 0.0425 \\
-% \hline
-% \end{tabular}
-% \caption{Summary statistics of normalized energy values over 100 runs (for the 100 $max\_iter$ case).}
-% \end{table}
+% ===== Right column: sqrt(N) baseline =====
+\node[hdr, right=3.0cm of lh] (rh) {Naive $\sqrt{N}$ baseline};
+\node[box, below=2mm of rh]   (r1) {Estimate $P \approx \sqrt{N}$ \\ $= 6.46\!\times\!10^{14}$ \\ \textbf{0 s}};
+\node[box, below=of r1]       (r2) {Brute-force from $\sqrt{N}$ \\ \textbf{3323.8 s}};
+\node[total, below=of r2]     (r3) {Total: \textbf{3323.8 s}};
+\draw[arr] (r1) -- (r2);
+\draw[arr] (r2) -- (r3);
 
-% \begin{table}[h]
-% \centering
-% \begin{tabular}{l c}
-% \hline
-% Statistic & Normalized Energy \\
-% \hline
-% Best (max)   & 1. \\
-% Worst (min) & 0.89970262 \\
-% Mean        & 0.97642265 \\
-% Median      & 0.98642584 \\
-% Std. dev.   & 0.0284 \\
-% \hline
-% \end{tabular}
-% \caption{Summary statistics of normalized energy values over 100 runs (for the 1000 $max\_iter$ case).}
-% \end{table}
+\end{tikzpicture}
+\end{center}
 
-% \begin{table}[h]
-% \centering
-% \begin{tabular}{l c}
-% \hline
-% Statistic & Normalized Energy \\
-% \hline
-% Best (max)   & 0.99999606 \\
-% Worst (min) & 0.91698491 \\
-% Mean        & 0.98125215 \\
-% Median      & 0.99774576 \\
-% Std. dev.   & 0.0259 \\
-% \hline
-% \end{tabular}
-% \caption{Summary statistics of normalized energy values over 20 runs (for the 10,000 $max\_iter$ case).}
-% \end{table}
-    
-% \end{frame}
+\medskip
+\centerline{\small Factors found: $P = 573\,858\,364\,692\,161,\ \ Q = 726\,223\,323\,360\,389$ \quad (72 threads)}
+\centerline{The annealer's prediction places the brute-force search much closer to the true factor.}
 
-% \begin{frame}{Number of Bits vs Number of BQM variables}
+\end{frame}
 
-%     \begin{figure}[htp]
-%         \centering
-%         \includegraphics[width=\textwidth]{bits vs number of bqm variables.jpeg}
-%         \caption{Number of bits vs number of bqm variables. Excuse the lack of clarity I just had the image.}
-%         \label{fig: bits vs number of bqm variables.}
-%     \end{figure}
-    
-% \end{frame}
+%====================================================
+\section{Future Work}
+%====================================================
 
-% \begin{frame}[allowframebreaks]{DA1 performance on QAP}
+\begin{frame}{Future Work}
 
-% \begin{itemize}
-%     \item One \textbf{Iteration} is the process of calculating the energy difference (and subsequently the Metropolis-Hasting condition) for all spins in the ensemble at a fixed Temperature (T). Followed by all required flips.
-%     \item \textbf{$\Delta$ T}  is the value of the Temperature step used for cooling. Updates after running `$max\_iter$' number of iterations (or when the early stopping condition is reached.
-%     \item \textbf{max\_iter} is a predefined variable that sets the maximum number of iterations the algorithm performs at a given T.
-%     \item We also stop iterating if the total energy difference after between two iterations is less than \textbf{0.01} and if this happens continuously for \textbf{5\%} of $max\_iter$ number of iterations.
-%     \item We use initial temperature as \textbf{100.0} and final temperature as \textbf{0.01}.
-%     \item Note that in the graph below, all other accepted solutions lie between 88\% and 90\% of optimal energy values
-% \end{itemize}
+\textbf{Better classical post-processing.} Brute-force trial division is the simplest way to consume the annealer's guess $(P_{\text{pred}}, Q_{\text{pred}})$, but it makes almost no use of the prediction beyond using it as a starting point. The annealer hands us a rich piece of information — an approximate factor of $N$ — and existing classical factorization techniques may be able to exploit this kind of partial information far more effectively than a linear scan. Exploring such methods is a natural next step.
 
-%     \begin{figure}[htp]
-%         \centering
-%         \includegraphics[width=0.9\textwidth]{Accepted solutions versus delta T.png}
-%         \caption{Number of Accepted solutions versus delta T. The values in the brackets represent number of solutions that reach 95\% of the optimal solution out of 100 independent runs.}
-%         \label{fig: Accepted solutions versus delta T.}
-%     \end{figure}
+\medskip
+\textbf{The real bottleneck: annealer solution quality.} From the brute-force timing model
+\[
+\text{Time}(\text{s}) \;=\; \frac{3.32 \times 10^{-9}}{\text{threads}} \,\times\, \text{Gap}(\%) \,\times\, 2^n,
+\]
+two levers control the total cost:
+\begin{itemize}
+  \item \textbf{Threads:} linear scaling — pure compute throw. Useful but bounded by hardware.
+  \item \textbf{Gap (\%):} a multiplicative factor in front of $2^n$. Since $2^n$ grows exponentially with bit-length, \emph{shrinking the gap is the only lever that can keep up} with larger $N$.
+\end{itemize}
 
-    
-% \end{frame}
+\medskip
+\textbf{Therefore the highest-impact direction is improving the annealer:} tighter QUBO encodings, larger neighborhoods, better cooling schedules, parallel-tempering or population annealing on top of the GPU SA — anything that drives $P_{\text{pred}}$ closer to $P$ and chips away at $\text{Gap}(\%)$.
 
-% \begin{frame}{DA1 time performance on QAP}
+\end{frame}
 
-%     \begin{figure}[htp]
-%         \centering
-%         \includegraphics[width=0.9\textwidth]{Time taken for a single run versus delta T.png}
-%         \caption{Time taken for a single run versus delta T.}
-%         \label{fig: Time taken for a single run versus delta T.}
-%     \end{figure}
-    
-% \end{frame}
-
-% \begin{frame}{DA1 Time per Iteration}
-
-%     \begin{figure}[htp]
-%         \centering
-%         \includegraphics[width=0.9\textwidth]{Average time per iteration in DA1.png}
-%         \caption{Average time per iteration (ms) in DA1.}
-%         \label{fig: Average time per iteration in DA1.}
-%     \end{figure}
-    
-% \end{frame}
-
-
-% \begin{frame}[allowframebreaks]{Energy difference distribution}
-
-%     \begin{figure}[htp]
-%         \centering
-%         \includegraphics[width=0.9\textwidth]{Distribution of Energy difference values across iterations_first half.png}
-%         \caption{Distribution of Energy difference values across iterations (1).}
-%         \label{fig: Distribution of Energy difference values across iterations (1).}
-%     \end{figure}
-%     \begin{figure}[htp]
-%         \centering
-%         \includegraphics[width=0.9\textwidth]{Distribution of Energy difference values across iterations_second half.png}
-%         \caption{Distribution of Energy difference values across iterations (2).}
-%         \label{fig: Distribution of Energy difference values across iterations (2).}
-%     \end{figure}
-% \end{frame}
-
-% \begin{frame}[allowframebreaks]{Time taken versus number of parallel runs}
-
-% The graph shows the time taken by the GPU to complete a fixed number of iterations of the simulated annealing (the actual values of time is not important only the trend).
-
-% \begin{figure}[htp]
-%     \centering
-%     \includegraphics[width=0.65\textwidth]{Time taken vs number of parallel runs.png}
-%     \caption{Time taken vs Number of parallel runs. (problem scale 12)}
-%     \label{fig: Time taken vs number of parallel runs.}
-% \end{figure}
-
-% \begin{itemize}
-%     \item As its visible $2^{15}$ parallel runs (around 30k) for QAP of problem scale 12 is the most optimal for the GH200. This paired with an appropriate temperature schedule is able to find 95\% of the optimal solution in 0.44 seconds.
-%     \item Its worth noting how the time taken increases at the start from $2^1$ to $2^9$ parallel runs even though we should have plenty of threads. This is likely due to the overhead cost (time taken to launch kernels, CPU to GPU memory transfer, etc), but I am not entirely sure as to why it scales the way it does and stays constant from $2^{10}$ to $2^{15}$. But the `doubling' in time that we see after $2^{15}$ is because the GPU is running in patches of $2^{15}$ runs as we hit the limit of available threads.
-% \end{itemize}
-    
-% \end{frame}
-
-% \section{GH200 Benchmarking of QAP}
-
-% \begin{frame}{GH200 Benchmarking of QAP}
-
-%    \begin{table}[h]
-%    \scriptsize
-%     \centering
-%     \begin{tabular}{|c|c|c|c|c|}
-%         \hline
-%         \textbf{Problem Scale} & \textbf{GPU Energy} & \textbf{Gurobi 12.0 Energy} & \textbf{GPU Time (s)} & \textbf{Gurobi Time (s)} \\ \hline
-%         3  & 2.34 & 2.34 & 0.0052 & 0.0314 \\ \hline
-%         4  & 2.21 & 2.21 & 0.0061 & 0.0383 \\ \hline
-%         5  & 5.72 & 5.72 & 0.0241 & 0.1082 \\ \hline
-%         6  & 6.76 & 6.76 & 0.112  & 0.1748 \\ \hline
-%         7  & 9.35 & 9.28 & 0.1428 & 0.4429 \\ \hline
-%         8  & 9.83 & 9.83 & 1.78   & 0.3253 \\ \hline
-%         9  & 16.29 & 16.26 & 24.67 & 0.5087 \\ \hline
-%         10 & 20.33 & 20.27 & 33.41 & 5.9119 \\ \hline
-%         11 & 22.91 & 22.72 & 45.59 & 77.9059 \\ \hline
-%         12 & 29.83 & 29.23 & 62.05 & 847.4936 \\ \hline
-%     \end{tabular}
-%     \caption{Comparison of GPU and Gurobi Energy and Time}
-%     \label{tab:energy_time_comparison}
-% \end{table}
-    
-% \end{frame}
-
-% \begin{frame}{Original Benchmark from the paper}
-
-%     \begin{figure}[htp]
-%         \centering
-%         \includegraphics[width=\textwidth]{QAP Original Benchmark.png}
-%         \bigskip
-%         \caption{QAP Original Benchmark.}
-%         \label{fig: QAP Original Benchmark.}
-%     \end{figure}
-    
-% \end{frame}
-
-% \begin{frame}{GH200 Plot}
-
-%     \begin{figure}[htp]
-%         \centering
-%         \includegraphics[width=0.85\textwidth]{QAP Benchmark GH200.png}
-%         \bigskip
-%         \caption{QAP Benchmark GH200.}
-%         \label{fig: QAP Benchmark GH200.}
-%     \end{figure}
-    
-% \end{frame}
-
-% \begin{frame}{GH200 Benchmark run wise values}
-
-% \begin{table}[h]
-%     \tiny
-%     \centering
-%     \begin{tabular}{ccccccccccc}
-%         \toprule
-%         Problem Scale & Run 1 & Run 2 & Run 3 & Run 4 & Run 5 & Run 6 & Run 7 & Run 8 & Run 9 & Run 10 \\
-%         \midrule
-%         3 & 2.34 & 2.34 & 2.34 & 2.34 & 2.34 & 2.34 & 2.34 & 2.34 & 2.34 & 2.34 \\
-%         4 & 2.21 & 2.21 & 2.21 & 2.21 & 2.21 & 2.21 & 2.21 & 2.21 & 2.21 & 2.21 \\
-%         5 & 5.72 & 5.72 & 5.72 & 5.72 & 5.72 & 5.72 & 5.72 & 5.72 & 5.72 & 5.72 \\
-%         6 & 6.78 & 6.78 & 6.78 & 6.78 & 6.78 & 6.78 & 6.78 & 6.78 & 6.78 & 6.78 \\
-%         7 & 9.83 & 9.83 & 9.83 & 9.83 & 9.83 & 9.83 & 9.83 & 9.83 & 9.83 & 9.83 \\
-%         8 & 16.29 & 16.31 & 16.29 & 16.29 & 16.26 & 16.29 & 16.29 & 16.31 & 16.31 & 16.31 \\
-%         9 & 20.46 & 20.46 & 20.49 & 20.49 & 20.56 & 20.46 & 20.46 & 20.46 & 20.49 & 20.49 \\
-%         10 & 25.33 & 25.33 & 25.39 & 25.39 & 25.39 & 25.33 & 25.33 & 25.33 & 25.39 & 25.39 \\
-%         11 & 22.92 & 22.67 & 20.94 & 20.82 & 23.96 & 22.92 & 22.92 & 22.92 & 22.80 & 22.67 \\
-%         12 & 30.2 & 30.14 & 30.23 & 30.23 & 29.86 & 29.75 & 29.75 & 29.49 & 29.69 & 29.66 \\
-%         \bottomrule
-%     \end{tabular}
-%     \caption{Performance by Run and Problem Scale}
-%     \label{tab:performance_table}
-% \end{table}
-    
-% \end{frame}
-
-% \begin{frame}{GH200 Benchmarking parameters}
-
-% % Requires: \usepackage{booktabs}
-% \begin{table}[h]
-%     \scriptsize
-%     \centering
-%     \begin{tabular}{cccc}
-%         \toprule
-%         Problem Scale & Parallel Sweeps & Number of Iterations & Temperature Parameters \\
-%         \midrule
-%         3  & 1000  & 4    & 1, 0.001, 0.97 \\
-%         4  & 1000  & 5    & 1, 0.001, 0.97 \\
-%         5  & 2000  & 20   & 1, 0.001, 0.97 \\
-%         6  & 5000  & 100  & 1, 0.001, 0.97 \\
-%         7  & 6000  & 1000 & 1, 0.001, 0.97 \\
-%         8  & 10000 & 5000 & 1, 0.001, 0.97 \\
-%         9  & 30000 & 8000 & 2, 0.001, 0.97 \\
-%         10 & 30000 & 8000 & 2, 0.001, 0.97 \\
-%         11 & 30000 & 8000 & 2, 0.001, 0.97 \\
-%         12 & 30000 & 8000 & 2, 0.001, 0.97 \\
-%         \bottomrule
-%     \end{tabular}
-%     \caption{Problem Scale, Parallel Sweeps, Number of Iterations, and Temperature Parameters.}
-%     \label{tab:parameters}
-% \end{table}
-    
-% \end{frame}
 
 \end{document}
