@@ -10,14 +10,14 @@
 #      to a separate "winner" file; record its energy
 #   5. post-process the winner to get predicted P, Q and verify correctness
 #
-# Outputs (default location: multiseed_bench/, alongside this script):
-#   multiseed_bench/results.csv               one summary row per bit size
-#   multiseed_bench/results_per_run.csv       one row per (B, seed)
-#   multiseed_bench/spins/spins_<N>_seed<i>   per-run spin states
-#   multiseed_bench/spins/spins_<N>_best      winning spin state
-#   multiseed_bench/spins/best_energy_<N>.txt winning best-energy value
+# Outputs (default location: Multiseed_Benchmark/, alongside this script):
+#   Multiseed_Benchmark/results.csv               one summary row per bit size
+#   Multiseed_Benchmark/results_per_run.csv       one row per (B, seed)
+#   Multiseed_Benchmark/spins/spins_<N>_seed<i>   per-run spin states
+#   Multiseed_Benchmark/spins/spins_<N>_best      winning spin state
+#   Multiseed_Benchmark/spins/best_energy_<N>.txt winning best-energy value
 #
-# Usage: ./multiseed_bench/multiseed_benchmark.sh [options]
+# Usage: ./Multiseed_Benchmark/multiseed_benchmark.sh [options]
 #
 # Options:
 #   -k <K>    independent SA runs per case             (default: 10)
@@ -27,7 +27,7 @@
 #   -m <M>    sweeps per beta                           (default: 10)
 #   -a <F>    target uphill accept rate (-x auto)       (default: 0.5)
 #   -B <list> comma-separated bit sizes                 (default: 8,10,...,62)
-#   -o <name> output prefix relative to repo root       (default: multiseed_bench/results)
+#   -o <name> output prefix relative to repo root       (default: Multiseed_Benchmark/results)
 #   -K        clean per-seed spin files after each B (only keep winner)
 #   -h        show this help
 
@@ -47,7 +47,7 @@ STOP_TEMP=1e-8
 ALPHA=0.95
 SWEEPS=10
 ACCEPT_RATE=0.5
-OUT_PREFIX="multiseed_bench/results"
+OUT_PREFIX="Multiseed_Benchmark/results"
 KEEP_PER_SEED_SPINS=true
 
 BITS_LIST=()
@@ -60,7 +60,7 @@ QUBO_SRC="QUBO_Construction/QUBO_Integer_Factorization.cpp"
 CSR_DIR="bin_SI"
 META_DIR="qubo_metadata"
 RESULTS_DIR="results"
-MULTISEED_DIR="multiseed_bench/spins"
+MULTISEED_DIR="Multiseed_Benchmark/spins"
 
 # ── Parse CLI ────────────────────────────────────────────────
 while getopts ":k:x:y:c:m:a:B:o:Kh" opt; do
