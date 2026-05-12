@@ -1,5 +1,5 @@
 
-set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/src/Flip_Single_SA.cu PROPERTIES LANGUAGE CUDA)
+set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/src/Graph_Colored_SA.cu PROPERTIES LANGUAGE CUDA)
 
 #set(CMAKE_CUDA_FLAGS "--generate-code arch=compute_30,code=sm_70 -Xptxas=-v -c -O3 -lineinfo -Xcompiler=-Wall")
 #set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS}; 	-O3 	-gencode arch=compute_62,code=sm_62 )
@@ -14,7 +14,7 @@ endif (CMAKE_BUILD_TYPE_UPPER STREQUAL "RELEASE")
 message(${CUDA_curand_LIBRARY}, "&&&&&&&&&&&&&&&&")
 set(TARGET "annealer_gpu_SI")
 
-set(sources ${CMAKE_CURRENT_SOURCE_DIR}/src/Flip_Single_SA.cu ${CMAKE_CURRENT_SOURCE_DIR}/src/utils.cc)
+set(sources ${CMAKE_CURRENT_SOURCE_DIR}/src/Graph_Colored_SA.cu ${CMAKE_CURRENT_SOURCE_DIR}/src/utils.cc)
 set(headers ${CMAKE_CURRENT_SOURCE_DIR}/include/annealer_gpu_SI/cudamacro.h)
 
 add_executable(${TARGET} ${sources}) # ${headers})
