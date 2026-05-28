@@ -267,7 +267,7 @@ $H = \sum_i Q_{ii} x_i + \sum_{i < j} Q_{ij} x_i x_j$ becomes
                        + \sum_{i<j} J_{ij} \sigma_i \sigma_j
                        + \text{const.},
 \end{equation}
-Treating $Q$ symmetrically ($Q_{ij} = Q_{ji}$ for $i \neq j$),
+Treating $Q$ symmetrically, ($Q_{ij} = Q_{ji}$ for $i \neq j$),
 \begin{equation}
   J_{ij} = \tfrac{1}{4} Q_{ij}, \quad
   h_i    = -\tfrac{1}{2} Q_{ii} - \tfrac{1}{4} \sum_{j \neq i} Q_{ij}.
@@ -278,8 +278,6 @@ The Ising form of the factorization problem is what we use throughout.
 \section{Structural scaling and sparse storage}\label{sec:scaling}
 % =====================================================================
 
-What does the resulting Ising problem actually look like? Two
-empirical facts shape the rest of the paper.
 
 \paragraph{The coupling matrix is sparse, and stays sparse.}
 \figplaceholderwide{fig:sparsity}{Sparsity of $J_{ij}$ at $N=39\,203$ (162 spins),
@@ -293,31 +291,22 @@ panel: a small dense block of "hub" rows / columns near index zero,
 and a long thin diagonal trail. The dense block corresponds to
 auxiliary $w$-variables introduced during quadrization
 (Section~\ref{sec:quad}), each of which couples to every clause it
-participates in; the diagonal trail comes from the carries
+participates in and the diagonal trail comes from the carries
 $s_{i,j}$, which couple only to their immediate column neighbors.
 
 \paragraph{Hub spin count grows only with $\log N$.}
 \figplaceholder{fig:hubcount}{Number of total Ising spins versus number of
-\emph{densely connected} (row degree $\geq 128$) hub spins as the bit
-width of $N$ grows from $16$ to $\sim 128$. Total grows as
-$\bigO(n^3)$; hub count grows as $\bigO(\log N)$, plateauing near $120$
-at $128$ bits.}
-Figure~\ref{fig:hubcount} separates the total spin count from the
-\emph{dense} spin count (row degree $\geq 128$). The former grows
-roughly cubically with $n$; the latter grows only logarithmically, and
-saturates around $120$ at $128$ bits. The dense set is small enough to
-hold in shared memory in its entirety, and large enough that every
-sparse spin reads from it on every sweep. This is the structural fact
-that the kernel design in Section~\ref{sec:sa} exploits.
+densely connected hub spins as the bit
+width of $N$ grows to $\sim 128$. Total grows as
+$\bigO(n^3)$; hub count grows as $\bigO(\log N)$.}
+Figure~\ref{fig:hubcount}
 
 \paragraph{CSR storage.}
-A dense $|J|^2$ representation is wasteful at $|J| > 10^4$ and
-infeasible at $|J| > 10^5$. We store $J$ in Compressed Sparse Row
+We store $J$ in Compressed Sparse Row
 (CSR) format: a \texttt{row\_ptr} of $N+1$ row offsets, a
 \texttt{col\_idx} array of column indices, and a \texttt{values} array
 of the nonzeros. Memory is $\bigO(N + \mathrm{nnz})$ rather than
-$\bigO(N^2)$; for the problems considered here, $\mathrm{nnz}$ is
-typically $10$--$100\times$ smaller than $N^2$.
+$\bigO(N^2)$. Here, $\mathrm{nnz}$ is the number of nonzeros values in the matrix.
 
 % =====================================================================
 \section{Graph-colored simulated annealing on the GPU}\label{sec:sa}
@@ -329,157 +318,130 @@ $\min(1, e^{-\beta \dE_i})$. The serial cost of one sweep is
 $\bigO(\mathrm{nnz})$. To turn that into wall-clock time on a GPU we
 need three things: a way to flip many spins in parallel without
 breaking the energy bookkeeping, kernels whose work pattern matches
-GPU resources, and a memory layout that keeps the hot data in fast
+GPU resources, and a memory layout that keeps the highly accessed data in fast
 storage.
 
-\subsection{Why parallel Metropolis needs coloring}\label{sec:sa-coloring}
+\subsection{Computing $\Delta E$ from local fields}\label{sec:sa-deltaE}
 
-Single-spin Metropolis updates the state one spin at a time. Two
-spins coupled by $J_{ij} \neq 0$ cannot be flipped simultaneously: the
-$\dE$ each one computes depends on the current value of the other,
-so flipping both at once leaves the running energy accumulator
-inconsistent with the new spin state.
+Each Metropolis test needs the energy change $\dE_i$ that flipping
+spin $i$ would cause. The obvious way to get it is to evaluate the
+total energy of the current state, flip the spin, evaluate the total
+energy again, and subtract. This is not effecient. 
 
-\emph{Graph coloring} of the interaction graph (nodes = spins, edges =
-nonzero $J_{ij}$) partitions the spins into independent sets such that
-no two same-color spins are coupled. All spins of one color can then
+Flipping a single spin, changes only the energy terms that
+involve that spin. Writing the Ising energy as
+$E(\boldsymbol\sigma) = \sum_{i<j} J_{ij}\sigma_i\sigma_j + \sum_i h_i
+\sigma_i$ and flipping $\sigma_i \to -\sigma_i$ changes it by
+\begin{equation}
+  \dE_i \;=\; -2\,\sigma_i \underbrace{\Bigl(\textstyle\sum_j J_{ij}\sigma_j + h_i\Bigr)}_{\text{local field } L_i},
+  \label{eq:deltaE}
+\end{equation}
+where $L_i$ is the local field acting on spin $i$. The $\dE_i$ calculation 
+therefore collapses to a single sparse dot product over spin
+$i$'s neighbour row.
+
+\figplaceholder{fig:deltaE}{Local-field evaluation of $\dE_i$. Each
+thread group loads spin $i$'s neighbour row from the CSR, multiplies
+each coupling $J_{ij}$ by the neighbour spin $\sigma_j$, reduces the
+products to the local field $L_i = \sum_j J_{ij}\sigma_j + h_i$, and
+returns $\dE_i = -2\sigma_i L_i$. One group per spin lets all $N$
+differences be evaluated in a single parallel pass.}
+
+
+This local-field form is what makes the annealer a good fit for a GPU.
+Because $L_i$ depends only on the current configuration and never on
+another candidate's flip, the $\dE_i$ of all $N$ spins are mutually
+independent and can be evaluated in a single parallel pass, with one
+thread group reducing each spin's neighbour row (Figure~\ref{fig:deltaE}.
+The thread-to-spin mapping is the subject of
+Section~\ref{sec:sa-impl}). A full sweep then costs only
+$\bigO(\mathrm{nnz})$ of total work, spread across the GPU.
+
+
+Flipping every accepted spin at once would cause errors in the final energy value. All the
+$\dE_i$ are computed against the same frozen configuration. If two
+coupled spins ($J_{ij} \neq 0$) are both accepted and flipped together,
+each one's $\dE$ assumed the other stayed fixed, and the running energy
+accumulator no longer matches the new state. We may only flip a set of
+spins that are mutually uncoupled, and finding such sets is exactly
+what graph coloring provides.
+
+\subsection{Why parallel Metropolis needs graphcoloring}\label{sec:sa-coloring}
+
+Coloring of the interaction graph (nodes = spins, edges =
+nonzero $J_{ij}$) produces these mutually-uncoupled sets we look for. It
+partitions the spins into independent sets (colors) such that no two
+same-color spins are coupled ($J_{ij} = 0$ for all $i,j$ of the same
+color). All spins of one color can then
 be flipped in parallel: each one's $\dE$ depends only on spins of
-\emph{other} colors, which are unchanged during this color's
+other colors, which are unchanged during this color's
 pass. Sweeping every color in sequence gives a full Metropolis sweep
 with no synchronization inside a color and one synchronization between
 colors.
 
-We compute the coloring once at setup using a Welsh--Powell greedy
-heuristic (largest-degree-first, first-fit). The number of colors is
-upper-bounded by $\Delta + 1$ where $\Delta$ is the maximum degree;
-empirically the heuristic produces colorings within a few colors of
-optimum.
+We compute the coloring once at setup using the Welsh--Powell greedy
+heuristic~\cite{WelshPowell1967}.
 
-\subsection{Dense and sparse spin bins}\label{sec:sa-bins}
+\subsection{Further optimizations in implementation}\label{sec:sa-impl}
 
-The two empirical features from
-Section~\ref{sec:scaling} --- a small dense hub set and a long sparse
-tail --- map naturally onto two GPU kernels.
-\begin{description}
-  \item[Dense bin] (row degree $\geq 128$). One CUDA block of $1024$
-    threads handles one spin. Each thread accumulates a partial sum
-    over a stride of the spin's neighbor row; a shared-memory tree
-    reduction collapses the partials to $\dE$. The block size matches
-    the dense-row length so threads stay busy.
-  \item[Sparse bin] (row degree $< 128$). One warp ($32$ threads)
-    handles one spin; $32$ spins are packed into a $1024$-thread
-    block. Each warp does a warp-shuffle reduction --- no shared
-    memory, no explicit synchronization within the warp. This gives
-    much higher occupancy than the dense layout would for short rows.
-\end{description}
-The threshold $128$ matches the warp's natural reduction tier and is
-robust across the bit-width range we tested: above it, dense reduction
-amortizes the block-launch overhead; below it, the warp layout wins on
-occupancy.
+Two further choices keep the parallel sweep fast in practice. We introduce
+them here, with full details in Appendix~\ref{app:impl}.
 
-\subsection{Hub-tagged sparse CSR}\label{sec:sa-hubs}
+First, each spin is handled by a dedicated group of GPU threads, sized
+to its work. Computing a spin's $\dE$ is a reduction over its neighbour
+row (Eq.~\eqref{eq:deltaE}), so the natural amount of parallelism is the
+length of that row (non-zero values in the row). A densely connected spin is therefore assigned a full thread block (1024 threads).
+Every other spin is handled by a single warp (32 threads). Matching the group size to
+the row length avoids both idle threads on short rows and serialized
+work on long ones.
 
-The dense (hub) spins are read by essentially every sparse spin in
-every color pass. Reading them from global memory each time is
-expensive; we cache them once per color pass.
-
-Hub values for the entire problem are copied into a shared-memory
-array (at most $256$ bytes total) at the start of each sparse kernel
-launch. To resolve "is this neighbor a hub or not?" branchlessly, we
-\emph{tag} the column-index array of the sparse-only CSR: the high
-bit of \texttt{col\_idx[k]} encodes the answer.
-\begin{itemize}
-  \item High bit set: the low 31 bits are an index into the hub cache
-    in shared memory.
-  \item High bit clear: the entry is a raw global spin id, used as a
-    fallback for the rare non-hub neighbor.
-\end{itemize}
-The inner neighbor-sum loop is therefore a sign test on
-\texttt{col\_idx[k]}, a single shared-memory load on the hot path, and
-a global-memory load on the cold path. Whenever a hub spin flips
-(which can only happen on a color pass that contains hubs), the
-hub-value cache is refreshed by a small dedicated kernel before any
-sparse pass reads it.
-
-\subsection{Auto start temperature and cooling}\label{sec:sa-temp}
-
-A simulated-annealing run is parameterized by a temperature schedule
-$T_t = T_0 \alpha^t$ with $0 < \alpha < 1$ and an inner sweep count.
-The wrong $T_0$ wastes sweeps: too high and the run is effectively a
-random walk for many iterations; too low and the system freezes into
-the initial basin.
-
-We estimate $T_0$ adaptively, in the style of
-Ben-Ameur~\cite{BenAmeur2004}. Across $K = 10$ random spin
-configurations we sample every spin's uphill $\dE$ (the energy cost of
-a single flip when it raises the energy), average them, and set
-\begin{equation}
-  T_0 \;=\; \langle \dE^{+} \rangle \, / \, \ln(1 / \chi),
-\end{equation}
-where $\chi = 0.5$ is the target acceptance rate at the start of the
-schedule. The sampling reuses the same GPU buffers and hub cache as
-the annealing loop, so the cost is at most one full sweep per
-configuration. Cooling is geometric with $\alpha = 0.95$; the schedule
-runs until $T < 10^{-3}$.
-
-\subsection{Numerical scaffolding}\label{sec:sa-scaffolding}
-
-Two correctness checks and one bookkeeping invariant keep the run
-honest.
-\begin{description}
-  \item[Symmetry check.] On load, the annealer samples random rows of
-    the CSR and verifies that for every stored $(i, j, J_{ij})$ the
-    partner $(j, i, J_{ji})$ is also stored and has the same value.
-    The energy and $\dE$ formulas assume this; an upper-triangular-only
-    CSR would silently halve every off-diagonal coupling.
-  \item[Running-energy accumulator.] Instead of recomputing the total
-    energy from scratch after each sweep, the annealer keeps a running
-    sum: every accepted flip atomically adds its $\dE$ to a
-    \texttt{double} accumulator. At the end of each annealing run, the
-    accumulator is checked against a fresh full-state recomputation;
-    relative drift stays below $10^{-9}$ for all problem sizes we
-    tested.
-  \item[Best-state mirror.] A second device-side spin buffer mirrors
-    the live state whenever a new best running energy is observed.
-    The output spin file is written from this mirror, so the reported
-    state is the best one ever visited, not whatever happened to be
-    live at the final $T$ step.
-\end{description}
-
-\subsection{Putting it together}\label{sec:sa-loop}
-
-Algorithm~\ref{alg:setup} lists the one-time setup; the per-temperature
-loop is Algorithm~\ref{alg:anneal}.
+Second, the densely connected spins are cached in fast on-chip memory.
+Since, they couple to many others, they are
+read by almost every other spin's local-field computation, on every
+pass. Fetching them from slow global memory each time would then be ineffecient. 
+At the start of a pass, we copy their current values
+into the shared memory local to each thread group, where every group can
+read them cheaply. 
 
 \begin{algorithm}[t]
   \caption{One-time setup before annealing}
   \label{alg:setup}
-  Verify $J$ symmetry and zero diagonal (sampled)\;
+  Verify $J$ symmetry and zero diagonal\;
   Bin each spin: \textbf{dense} if $d_i \geq 128$, else \textbf{sparse}\;
   $\mathrm{color}[\cdot] \leftarrow$ Welsh--Powell greedy
-    coloring (largest-degree-first, first-fit)\;
+    coloring\;
   Bucket spins by color into dense / sparse offset arrays\;
-  Build the hub-tagged sparse-only CSR\;
-  Upload CSR, color tables, and hub arrays to the GPU\;
+  Build the sparse-spin CSR and the dense-spin cache\;
+  Upload CSR, color tables, and dense-spin arrays to the GPU\;
   Initialize a random spin state and compute the initial energy\;
-  Estimate $T_0 = \langle \dE^{+} \rangle / \ln(1/\chi)$\;
+  Estimate $T_0 = \langle \dE^{+} \rangle / \ln(1/\chi)$, where $\chi$ is acceptance rate\;
 \end{algorithm}
 
 \begin{algorithm}[t]
   \caption{Color-parallel simulated annealing loop}
   \label{alg:anneal}
-  \ForEach{$\beta$ in geometric schedule}{
+  \ForEach{$\beta$ in the geometric schedule}{
     \For{$\mathrm{sweep} = 1 \dots m$}{
-      Generate fresh uniform randoms for all $N$ spins\;
+      Draw a uniform random $r_i \in [0,1)$ for every spin\;
       \For{$c = 0 \dots N_{\mathrm{colors}} - 1$}{
-        Launch \textsc{collectFlipCandidates}$\langle$dense$\rangle$ on color $c$\;
-        Launch \textsc{collectFlipCandidates}$\langle$sparse$\rangle$ on color $c$\;
-        \textsc{applyAllFlipsInColor}: flip every accepted
-          spin, atomically add $\dE_i$ to the energy accumulator\;
-        \If{color $c$ contained any hub}{Refresh the hub-value cache\;}
+        \tcc{score every spin of color $c$ in parallel}
+        \ForEach{spin $i$ of color $c$ {\normalfont(in parallel)}}{
+          $L_i \leftarrow \sum_j J_{ij}\,\sigma_j + h_i$\;
+          $\dE_i \leftarrow -2\,\sigma_i L_i$\;
+          \tcc*[h]{Metropolis acceptance test}
+          \If{$r_i < \min\!\bigl(1,\, e^{-\beta \dE_i}\bigr)$}{
+            mark spin $i$ as accepted\;
+          }
+        }
+        \tcc{apply all accepted flips of the color together}
+        \ForEach{accepted spin $i$ {\normalfont(in parallel)}}{
+          $\sigma_i \leftarrow -\sigma_i$\;
+          add $\dE_i$ to the running energy\;
+        }
+        \If{color $c$ contained a dense spin}{refresh the dense-spin cache\;}
       }
     }
-    \If{running energy $<$ best energy}{snapshot best spins\;}
+    \If{running energy $<$ best energy}{save the current spins as the best\;}
   }
   \Return best-energy spin configuration\;
 \end{algorithm}
@@ -789,6 +751,105 @@ energy in Eq.~\eqref{eq:energy} therefore collapses every $p_k^2$,
 $q_k^2$, and $s^2$ back to its linear form, which is what lets the
 squared objective be written as a degree-2 QUBO once the residual cubic
 and quartic terms are quadrized (Section~\ref{sec:quad}).
+
+% =====================================================================
+\section{Implementation details}\label{app:impl}
+% =====================================================================
+
+This appendix expands the two implementation choices summarized in
+Section~\ref{sec:sa-impl}, and records the start-temperature estimate,
+cooling schedule, and correctness checks used in every run.
+
+\subsection{Dense and sparse spin bins}\label{sec:sa-bins}
+
+The two empirical features from
+Section~\ref{sec:scaling} --- a small dense hub set and a long sparse
+tail --- map naturally onto two GPU kernels.
+\begin{description}
+  \item[Dense bin] (row degree $\geq 128$). One CUDA block of $1024$
+    threads handles one spin. Each thread accumulates a partial sum
+    over a stride of the spin's neighbor row; a shared-memory tree
+    reduction collapses the partials to $\dE$. The block size matches
+    the dense-row length so threads stay busy.
+  \item[Sparse bin] (row degree $< 128$). One warp ($32$ threads)
+    handles one spin; $32$ spins are packed into a $1024$-thread
+    block. Each warp does a warp-shuffle reduction --- no shared
+    memory, no explicit synchronization within the warp. This gives
+    much higher occupancy than the dense layout would for short rows.
+\end{description}
+The threshold $128$ matches the warp's natural reduction tier and is
+robust across the bit-width range we tested: above it, dense reduction
+amortizes the block-launch overhead; below it, the warp layout wins on
+occupancy.
+
+\subsection{Hub-tagged sparse CSR}\label{sec:sa-hubs}
+
+The dense (hub) spins are read by essentially every sparse spin in
+every color pass when calculating their $\dE$. Reading them from global memory each time is
+expensive, so we cache them once per color pass.
+
+Hub values for the entire problem are copied into a shared-memory
+array (at most $256$ bytes total) at the start of each sparse kernel
+launch. To resolve "is this neighbor a hub or not?" branchlessly, we
+\emph{tag} the column-index array of the sparse-only CSR: the high
+bit of \texttt{col\_idx[k]} encodes the answer.
+\begin{itemize}
+  \item High bit set: the low 31 bits are an index into the hub cache
+    in shared memory.
+  \item High bit clear: the entry is a raw global spin id, used as a
+    fallback for the rare non-hub neighbor.
+\end{itemize}
+The inner neighbor-sum loop is therefore a sign test on
+\texttt{col\_idx[k]}, a single shared-memory load on the hot path, and
+a global-memory load on the cold path. Whenever a hub spin flips
+(which can only happen on a color pass that contains hubs), the
+hub-value cache is refreshed by a small dedicated kernel before any
+sparse pass reads it.
+
+\subsection{Auto start temperature and cooling}\label{sec:sa-temp}
+
+A simulated-annealing run is parameterized by a temperature schedule
+$T_t = T_0 \alpha^t$ with $0 < \alpha < 1$ and an inner sweep count.
+The wrong $T_0$ wastes sweeps: too high and the run is effectively a
+random walk for many iterations; too low and the system freezes into
+the initial basin.
+
+We estimate $T_0$ adaptively, in the style of
+Ben-Ameur~\cite{BenAmeur2004}. Across $K = 10$ random spin
+configurations we sample every spin's uphill $\dE$ (the energy cost of
+a single flip when it raises the energy), average them, and set
+\begin{equation}
+  T_0 \;=\; \langle \dE^{+} \rangle \, / \, \ln(1 / \chi),
+\end{equation}
+where $\chi = 0.5$ is the target acceptance rate at the start of the
+schedule. The sampling reuses the same GPU buffers and hub cache as
+the annealing loop, so the cost is at most one full sweep per
+configuration. Cooling is geometric with $\alpha = 0.95$; the schedule
+runs until $T < 10^{-3}$.
+
+\subsection{Numerical scaffolding}\label{sec:sa-scaffolding}
+
+Two correctness checks and one bookkeeping invariant keep the run
+honest.
+\begin{description}
+  \item[Symmetry check.] On load, the annealer samples random rows of
+    the CSR and verifies that for every stored $(i, j, J_{ij})$ the
+    partner $(j, i, J_{ji})$ is also stored and has the same value.
+    The energy and $\dE$ formulas assume this; an upper-triangular-only
+    CSR would silently halve every off-diagonal coupling.
+  \item[Running-energy accumulator.] Instead of recomputing the total
+    energy from scratch after each sweep, the annealer keeps a running
+    sum: every accepted flip atomically adds its $\dE$ to a
+    \texttt{double} accumulator. At the end of each annealing run, the
+    accumulator is checked against a fresh full-state recomputation;
+    relative drift stays below $10^{-9}$ for all problem sizes we
+    tested.
+  \item[Best-state mirror.] A second device-side spin buffer mirrors
+    the live state whenever a new best running energy is observed.
+    The output spin file is written from this mirror, so the reported
+    state is the best one ever visited, not whatever happened to be
+    live at the final $T$ step.
+\end{description}
 
 % =====================================================================
 \bibliography{paper}
