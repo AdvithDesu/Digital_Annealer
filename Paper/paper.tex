@@ -134,18 +134,18 @@ solution-quality results across $16$--$128$-bit semiprimes, and
 Section~\ref{sec:discussion} discusses limits and next steps.
 
 % =====================================================================
-\section{From factoring to a binary energy}\label{sec:formulation}
+\section{Integer factorization as a binary optimization problem}\label{sec:formulation}
 % =====================================================================
 
-Let $N = PQ$ be a semiprime with $P, Q$ odd primes of equal bit length
-$n = \lceil \tfrac{1}{2}\log_2 N \rceil$. Write
+Let $N = PQ$ be a semiprime with $P, Q$ being primes of equal bit length
+$n = \lceil \tfrac{1}{2}\log_2 N \rceil$. Write,
 \begin{equation}
   P = \sum_{k=0}^{n-1} 2^k p_k,
   \qquad
   Q = \sum_{k=0}^{n-1} 2^k q_k,
   \qquad p_k,q_k \in \{0,1\}.
 \end{equation}
-Four bits are known a priori: $p_0 = q_0 = 1$ (both factors are odd)
+Four bits are known a priori: $p_0 = q_0 = 1$ (as both factors are odd)
 and $p_{n-1} = q_{n-1} = 1$ (each is exactly $n$ bits).
 
 The product $PQ$, expanded as a binary long multiplication, places the
