@@ -148,83 +148,101 @@ $n = \lceil \tfrac{1}{2}\log_2 N \rceil$. Write,
 Four bits are known a priori: $p_0 = q_0 = 1$ (as both factors are odd)
 and $p_{n-1} = q_{n-1} = 1$ (each is exactly $n$ bits).
 
-The product $PQ$, expanded as a binary long multiplication, places the
-cross-term $p_a q_b$ in column $a+b$. Carries propagate left; we
-introduce binary carry variables $s_{i,j} \in \{0,1\}$, where $s_{i,j}$
-is the bit of column $i$'s carry destined for column $j > i$ (with
-weight $2^{j-i}$ when it arrives). Equating the value of column $i$ in
-$PQ$ to the value of column $i$ in $N$ yields a per-column constraint:
-\begin{equation}
-  C_i \;=\; N_i \;-\; \sum_j q_j p_{i-j}
-            \;-\; \sum_j s_{j,i}
-            \;+\; \sum_j 2^{j} s_{i,i+j} \;=\; 0,
-  \label{eq:Ci}
-\end{equation}
-where $N_i$ is the $i$th bit of $N$. The correct factor assignment
-satisfies $C_i = 0$ for every column. Squaring and summing turns the
-constraint system into an unconstrained optimization:
-\begin{equation}
-  E(\{p_i, q_i, s_{ij}\}) \;=\; \sum_i C_i^2.
-  \label{eq:energy}
-\end{equation}
-The ground state $E = 0$ recovers the factors.
-
-\paragraph{Worked example, $N = 391 = 17 \times 23$.}
-With $n = 5$, the unknown factor bits are $p_1, p_2, p_3$ and
-$q_1, q_2, q_3$ --- six free bits. The carry variables span at most
-two columns ahead (each column sum is bounded by a small constant), so
-the full system has nine column constraints $C_0,\dots,C_8$ and a
-handful of carry variables. Three of those constraints are immediately
-useful: $C_0$ is trivially satisfied ($1 - 1 = 0$); $C_8$ reduces to
-$s_{6,8} + s_{7,8} = 0$, forcing both carries to zero; and $C_1$
-reads $p_1 + q_1 = 1 + 2 s_{1,2}$, which has no solution with
-$s_{1,2}=1$ (the LHS is at most $2$) so $s_{1,2} = 0$ and
-$q_1 = 1 - p_1$. The same logic threads through $C_2$. Six rules of
-this kind --- enumerated next --- handle the bulk of the
-simplification.
+Multiplying these two binary numbers and matching the result against
+the known bits of $N$ turns factorization into a constraint satisfaction
+problem. We adopt the column-based multiplication-table formulation, and the
+classical bit-reduction rules that accompany it, from Jiang \emph{et
+al.}~\cite{Jiang2018}, who used the same construction to factor
+semiprimes on a quantum annealer. Section~\ref{sec:preproc} develops the column
+equations, the rules that follow them, and the conversion to an Ising
+model that encodes $P$ and $Q$.
 
 % =====================================================================
 \section{Classical pre-processing}\label{sec:preproc}
 % =====================================================================
 
-Squaring \eqref{eq:Ci} directly produces a polynomial with
-\emph{many} more terms than needed: each carry variable shows up in
-multiple clauses, and cross-products like $p_i q_j$ appear with very
-different weights in different columns. Before handing the problem to
-the annealer, we eliminate as many variables and as much redundancy as
+\begin{table*}[t]
+\centering
+\caption{Binary long-multiplication table for $N = 391 = 17 \times 23$,
+with $P = (1\,p_3\,p_2\,p_1\,1)_2$ and
+$Q = (1\,q_3\,q_2\,q_1\,1)_2$ (the outer bits are fixed; only
+$p_1,p_2,p_3,q_1,q_2,q_3$ are unknown). Each cross-term $p_a q_b$ sits
+in the column of place value $2^{a+b}$. A column also receives carries
+from lower columns (carry-in) and emits carries to higher ones
+(carry-out). Balancing the column sum against the known bit of $N$
+gives the clause $C_i = 0$ of Eq.~\eqref{eq:Ci}.}
+\label{tab:multtable}
+\small
+\setlength{\tabcolsep}{10pt}
+\renewcommand{\arraystretch}{1}
+\begin{tabular}{l|ccccccccc}
+\toprule
+ & $2^8$ & $2^7$ & $2^6$ & $2^5$ & $2^4$ & $2^3$ & $2^2$ & $2^1$ & $2^0$ \\
+\midrule
+$P$ & & & & & $1$   & $p_3$ & $p_2$ & $p_1$ & $1$ \\
+$Q$ & & & & & $1$   & $q_3$ & $q_2$ & $q_1$ & $1$ \\
+\midrule
+            & & & & & $1$ & $p_3$ & $p_2$ & $p_1$ & $1$ \\
+            & & & & $q_1$ & $p_3 q_1$ & $p_2 q_1$ & $p_1 q_1$ & $q_1$ & \\
+            & & & $q_2$ & $p_3 q_2$ & $p_2 q_2$ & $p_1 q_2$ & $q_2$ & & \\
+            & & $q_3$ & $p_3 q_3$ & $p_2 q_3$ & $p_1 q_3$ & $q_3$ & & & \\
+            & $1$ & $p_3$ & $p_2$ & $p_1$ & $1$ & & & & \\
+\midrule
+carry-in    & $s_{6,8}$ & $s_{5,7}$ & $s_{4,6}$ & $s_{3,5}$ & $s_{2,4}$ & $s_{2,3}$ & $s_{1,2}$ & & \\
+            & $s_{7,8}$ & $s_{6,7}$ & $s_{5,6}$ & $s_{4,5}$ & $s_{3,4}$ & & & & \\
+\midrule
+carry-out   & & $s_{7,8}$ & $s_{6,7}$ & $s_{5,6}$ & $s_{4,5}$ & $s_{3,4}$ & $s_{2,3}$ & $s_{1,2}$ & \\
+            & & & $s_{6,8}$ & $s_{5,7}$ & $s_{4,6}$ & $s_{3,5}$ & $s_{2,4}$ & & \\
+\midrule
+$N = 391$   & $1$ & $1$ & $0$ & $0$ & $0$ & $0$ & $1$ & $1$ & $1$ \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+Multiplying $P$ and $Q$ is done by long multiplication, Table~\ref{tab:multtable} lays it
+out for $N = 391 = 17 \times 23$. The cross-terms $p_a q_b$
+land in the column of place value $2^{a+b}$. The contribution of a
+given place value to the product is the sum of every entry in its
+column.
+
+That column sum can exceed one, so there would be a carry into higher columns. We make these carries explicit as
+binary variables: $s_{i,j} \in \{0,1\}$ is the bit of column $i$'s
+carry that arrives in column $j > i$, where it contributes with weight
+$2^{j-i}$. Every column thus receives carries from lower columns
+(its carry-ins) and sends carries to higher ones
+(its carry-outs).
+
+Reading a column means balancing everything that lands in that place
+value against the known bit $N_i$ of $N$. Collecting the partial
+products, the incoming carries, and the outgoing carries gives one
+equation per column:
+\begin{equation}
+  C_i \;=\; N_i \;-\; \sum_j q_j\, p_{i-j}
+            \;-\; \sum_j s_{j,i}
+            \;+\; \sum_j 2^{j}\, s_{i,i+j} \;=\; 0,
+  \label{eq:Ci}
+\end{equation}
+The true factors are the unique
+bit assignment for which every column is balanced, i.e.\ $C_i = 0$ for all
+$i$. Squaring each clause and summing it gives us the energy function as,
+\begin{equation}
+  E(\{p_i, q_i, s_{ij}\}) \;=\; \sum_i C_i^2,
+  \label{eq:energy}
+\end{equation}
+whose global minimum $E = 0$ encodes the true factors $P$ and $Q$.
+
+Squaring \eqref{eq:Ci} directly, however, produces a polynomial with a large number of terms. Before handing the problem to the
+annealer, we eliminate as many variables and as much redundancy as
 possible using deterministic algebraic rules~\cite{Jiang2018}.
 
 \subsection{Reduction rules}\label{sec:rules}
 
-Each $C_i = 0$ is a linear (or low-degree) equation over $\{0,1\}$
-variables. Six rules suffice to drive most of the carries and several
-of the factor bits to fixed values; their formal statements and short
-proofs are collected in Appendix~\ref{app:rules}.
-\begin{description}
-  \item[Saturated sum.] $\sum x_i = n$ (all coefficients equal $\pm 1$,
-    $n$ terms) forces every $x_i = 1$.
-  \item[Zero sum.] $\sum x_i = 0$ with same-sign coefficients forces
-    every $x_i = 0$.
-  \item[Doubling.] $x_1 + x_2 = 2 x_3$ forces $x_1 = x_2 = x_3$.
-  \item[Coefficient bound.] If a single coefficient exceeds the
-    achievable opposing sum, that term is forced to $0$ or $1$.
-  \item[Complement.] $x_1 + x_2 = 1$ gives $x_2 = 1 - x_1$ and
-    $x_1 x_2 = 0$, eliminating a variable and killing one quadratic
-    term in any clause that referenced both.
-  \item[Parity.] Both sides of a column clause must have the same
-    parity; this pins the parity of the small factor-bit sum against
-    the (always-even) carry-out terms.
-\end{description}
-
-The simplifier applies these rules in a fixed priority order, looping
-until no rule fires on any clause. A seventh \emph{Replacement} rule
-isolates an $s$-variable that appears with coefficient $\pm 1$ and
-substitutes it back into every other clause. Replacement is powerful
-but greedy: a long chain of cascading replacements can fuse many small
-clauses into a single mega-clause whose squaring blows up the QUBO. We
-guard against this with a \emph{checkpoint}: the simplifier saves its
-state before the first Replacement and restores it if the chain failed
-to produce new value assignments.
+A small set of deterministic rules is enough to drive most carries and
+several factor bits to fixed values, or to rewrite one bit as an
+expression in others. We use seven such rules: the saturated-sum,
+zero-sum, doubling, coefficient-bound,
+complement, parity and replacementrules. The simplifier applies them in a fixed
+priority order, looping until no rule fires on any clause. They are detailed in Appendix~\ref{app:rules}.
 
 \subsection{Quadrization}\label{sec:quad}
 
@@ -232,15 +250,12 @@ The energy~\eqref{eq:energy} is degree four in the binary
 variables. Cubic and quartic terms arise from squaring clauses that
 contain products like $p_i q_j$. Standard
 QUBO solvers (and Ising hardware) require degree two, so we apply
-\emph{Rosenberg substitutions}~\cite{Rosenberg1975}: introduce an
+Rosenberg substitutions~\cite{Rosenberg1975}: introduce an
 auxiliary $w$ and add a penalty $P(A,B,w) = M(AB - 2Aw - 2Bw + 3w)$
-with $M$ large enough that any minimizer has $w = AB$. After
+with $M$ large enough that the minimizer would set $w = AB$. After
 substitution every cubic $AB \cdot s$ becomes a quadratic $w \cdot s$
 plus a constant-size quadratic penalty. The two sign variants of the
-cubic case, and the two variants of the quartic case (negative quartic
-needs only a single auxiliary; positive quartic needs two and is
-handled recursively), are standard. Implementation details and
-coefficient bookkeeping follow~\cite{Jiang2018}.
+cubic case, and the two variants of the quartic case, are standard and whose implementation follows~\cite{Jiang2018}.
 
 \subsection{From QUBO to Ising}\label{sec:qubotoising}
 
@@ -252,12 +267,12 @@ $H = \sum_i Q_{ii} x_i + \sum_{i < j} Q_{ij} x_i x_j$ becomes
                        + \sum_{i<j} J_{ij} \sigma_i \sigma_j
                        + \text{const.},
 \end{equation}
-with, treating $Q$ symmetrically so $Q_{ij} = Q_{ji}$ for $i \neq j$,
+Treating $Q$ symmetrically ($Q_{ij} = Q_{ji}$ for $i \neq j$),
 \begin{equation}
   J_{ij} = \tfrac{1}{4} Q_{ij}, \quad
   h_i    = -\tfrac{1}{2} Q_{ii} - \tfrac{1}{4} \sum_{j \neq i} Q_{ij}.
 \end{equation}
-The Ising form is what every downstream piece consumes.
+The Ising form of the factorization problem is what we use throughout.
 
 % =====================================================================
 \section{Structural scaling and sparse storage}\label{sec:scaling}
@@ -639,24 +654,6 @@ $P = 573\,858\,364\,692\,161$ and $Q = 726\,223\,323\,360\,389$.
 \section{Discussion}\label{sec:discussion}
 % =====================================================================
 
-\subsection{Where the time goes}
-
-Across the bit range we tested, three regimes dominate
-end-to-end wall-clock at different scales:
-\begin{itemize}
-  \item Below $\sim 40$ bits, the simplifier resolves the problem
-    completely; no SA is required.
-  \item Between $\sim 40$ and $\sim 80$ bits, SA dominates and the
-    brute-force step is sub-second.
-  \item Above $\sim 80$ bits, the multiplicative
-    $\mathrm{Gap} \cdot 2^n$ factor of Eq.~\eqref{eq:bf-time} drives
-    the brute-force step past the SA step.
-\end{itemize}
-The third regime is the operational bottleneck: SA hardware is
-hardware-bounded, but the brute-force prefactor is purely a function
-of solution quality. Cutting the gap in half halves the time at every
-bit width.
-
 \subsection{Limitations}\label{sec:limits}
 
 Several caveats are worth being explicit about.
@@ -709,62 +706,89 @@ FPGA-based annealers, both of which provide higher coupling-update
 throughput than a GPU for the same energy budget.
 
 % =====================================================================
-\section{Conclusion}\label{sec:conclusion}
-% =====================================================================
-
-A GPU-resident simulated annealer, structured around the empirical
-sparsity of factorization-derived Ising graphs, factors $\sim 100$-bit
-semiprimes in minutes on a single GH200. The contribution is not a
-break of any cryptographic system, but a measurement of how far
-commodity classical hardware reaches against a problem usually framed
-in quantum terms, and a concrete kernel design --- graph-colored
-Metropolis with hub-tagged sparse CSR --- that other Ising-problem
-domains can pick up directly.
-
-% =====================================================================
 \appendix
-\section{Reduction-rule proofs}\label{app:rules}
+\section{Reduction rules}\label{app:rules}
 % =====================================================================
 
-For $x_i \in \{0,1\}$:
+Every rule below acts on a single column clause --- a linear (or
+low-degree) equation in binary variables $x_i \in \{0,1\}$. Each either
+\emph{fixes} a variable to a constant or \emph{links} it to an
+expression in the others; substituting the result back into the
+remaining clauses shrinks the problem. We group the rules by which of
+these two things they do, and close with the identity that makes
+squaring the energy well-behaved.
+
+\subsection{Rules that fix a variable}
 
 \paragraph{Saturated sum.}
-If $\sum_{i=1}^n x_i = n$ then every $x_i = 1$, since $n$ binary
-variables sum to $n$ only when all are $1$.
+If $\sum_{i=1}^n x_i = n$ (all $n$ coefficients $+1$), then every
+$x_i = 1$ --- $n$ binary variables sum to $n$ only when all are one. The
+sign-flipped form $\sum_i (-x_i) = -n$ gives the same conclusion.
 
 \paragraph{Zero sum.}
-If $\sum_{i=1}^n x_i = 0$ with same-sign coefficients then every
-$x_i = 0$, since a sum of non-negative binaries vanishes only when
-every term does.
-
-\paragraph{Doubling.}
-$x_1 + x_2 = 2 x_3$ forces $x_1 = x_2 = x_3$: the LHS is in
-$\{0,1,2\}$ and the RHS in $\{0,2\}$, so the LHS must be even; the
-only way two binaries sum to an even number is both equal, and that
-shared value matches $x_3$.
+If $\sum_{i=1}^n x_i = 0$ with same-sign coefficients, then every
+$x_i = 0$ --- a sum of non-negative terms vanishes only when each term
+does.
 
 \paragraph{Coefficient bound.}
-In a clause $\sum_i c_i x_i + C = 0$ with $S_+ = \sum_{c_i > 0} c_i$
-and $S_- = \sum_{c_j < 0} |c_j|$: a positive coefficient $c_i$ with
-$c_i > S_- - C$ forces $x_i = 0$ (otherwise the LHS cannot reach
-zero), and $c_i > S_+ + C$ forces $x_i = 1$. The negative-coefficient
-cases are symmetric.
+For a clause $\sum_i c_i x_i + C = 0$, let
+$S_+ = \sum_{c_i > 0} c_i$ and $S_- = \sum_{c_j < 0} |c_j|$. A single
+coefficient that exceeds the largest sum the opposing terms can muster
+forces its variable:
+\begin{equation*}
+  c_i > S_- - C \Rightarrow x_i = 0,
+  \qquad
+  c_i > S_+ + C \Rightarrow x_i = 1
+\end{equation*}
+for $c_i > 0$ (the negative-coefficient cases are symmetric in $S_+$
+and $S_-$). In either case no assignment of the remaining variables can
+balance the clause otherwise.
+
+\subsection{Rules that link variables}
+
+\paragraph{Doubling.}
+$x_1 + x_2 = 2 x_3$ forces $x_1 = x_2 = x_3$. The left side lies in
+$\{0,1,2\}$ and the right in $\{0,2\}$, so the left side must be even;
+two binaries sum to an even number only when they are equal, and that
+shared value is exactly $x_3$.
 
 \paragraph{Complement.}
-$x_1 + x_2 = 1$ has only two solutions $(0,1)$ and $(1,0)$, so
-$x_2 = 1 - x_1$ and $x_1 x_2 = 0$.
+$x_1 + x_2 = 1$ has only the solutions $(0,1)$ and $(1,0)$, so
+$x_2 = 1 - x_1$ and the product $x_1 x_2 = 0$. This eliminates one
+variable outright and kills any quadratic term $x_1 x_2$ in clauses
+that referenced both.
 
 \paragraph{Parity.}
-Both sides of any linear clause must agree mod $2$. In a column
-clause, all carry terms have even coefficients, so the parity of the
-small factor-bit sum is pinned by the parity of $N_i$. Two factor
-bits with odd coefficients must therefore either be equal (if $N_i$ is
-even) or complementary (if $N_i$ is odd).
+Both sides of a clause must agree modulo $2$. In a column clause every
+carry term carries an even coefficient, so the parity of the small
+factor-bit sum is pinned by the parity of $N_i$: two factor bits with
+odd coefficients are forced equal when $N_i$ is even, and complementary
+($x_1 + x_2 = 1$) when $N_i$ is odd.
 
-\paragraph{Power rule (used by squaring).}
-For any $x \in \{0,1\}$ and $m \geq 1$, $x^m = x$. This makes the
-squared energy expressible as a degree-2 QUBO once cubic and quartic
-terms are quadrized.
+\subsection{The replacement rule}
+
+\paragraph{Replacement.}
+When no fixing or linking rule fires, a final \emph{replacement} rule
+keeps the simplification moving: it isolates a carry variable $s$ that
+appears with coefficient $\pm 1$ in some clause, solves that clause for
+$s$, and substitutes the resulting expression into every other clause.
+Unlike the rules above it removes a variable unconditionally rather
+than only under a numeric condition, which makes it powerful but
+greedy --- a long chain of cascading replacements can fuse many small
+clauses into a single dense ``mega-clause'' whose square inflates the
+QUBO. We guard against this with a \emph{checkpoint}: the simplifier
+saves its state before the first replacement and restores it if the
+chain fails to produce any new value assignments, so replacement is
+kept only when it actually shrinks the problem.
+
+\subsection{The power rule}
+
+\paragraph{Idempotence.}
+For any $x \in \{0,1\}$ and integer $m \geq 1$, $x^m = x$. Squaring the
+energy in Eq.~\eqref{eq:energy} therefore collapses every $p_k^2$,
+$q_k^2$, and $s^2$ back to its linear form, which is what lets the
+squared objective be written as a degree-2 QUBO once the residual cubic
+and quartic terms are quadrized (Section~\ref{sec:quad}).
 
 % =====================================================================
 \bibliography{paper}
