@@ -450,9 +450,9 @@ read them cheaply.
 \section{Brute-force post-processing}\label{sec:bruteforce}
 % =====================================================================
 
-The annealer rarely lands exactly on the ground state at the bit
-widths we test. It does, however, land \emph{close}: post-processing
-of its spin output recovers approximate factors $(P_{\mathrm{pred}},
+The annealer rarely lands exactly on the ground state at the size of bits
+ we test. It does, however, land close: post-processing
+of the final spin output recovers approximate factors $(P_{\mathrm{pred}},
 Q_{\mathrm{pred}})$ that differ from the true $(P, Q)$ by a few
 percent (Section~\ref{sec:results}). A targeted brute-force search
 closes the residual gap.
@@ -466,25 +466,28 @@ Their average is the search centroid:
   P_{\mathrm{centre}} \;=\;
   \tfrac{1}{2}\bigl(P_{\mathrm{pred}} + \lfloor N / Q_{\mathrm{pred}} \rfloor\bigr).
 \end{equation}
-Empirically, averaging halves the typical gap (see
+Empirically, this gives us a better starting point (see
 Figure~\ref{fig:quality}).
 
 \paragraph{Outward-spiral search.}
-Candidates are tested in chunks of $C = 2^{14}$, in outward-spiral
-order: chunk $k$ covers $[P_{\mathrm{centre}} + \tfrac{k}{2} C,
-P_{\mathrm{centre}} + (\tfrac{k}{2}+1) C - 1]$ if $k$ is even (upward
-step) and the analogous downward window if $k$ is odd. Threads claim
-the next chunk via an atomic counter, so the search is partially
-parallel and the closest candidates to $P_{\mathrm{centre}}$ are
-always tested first.
+The search runs on a CPU, spread across all available 
+threads. Candidates around $P_{\mathrm{centre}}$ are grouped into
+fixed-size chunks of $2^{14}$ consecutive integers. Each chunk is
+indexed by $k = 0, 1, 2, \dots$, and visited in outward-spiral order so
+that the candidates closest to $P_{\mathrm{centre}}$ are tested first. 
+Each thread repeatedly claims the next chunk through a
+shared atomic counter.
 
 \paragraph{Wheel sieve.}
-Within a chunk, candidates that are divisible by $2$, $3$, $5$, $7$,
-or $11$ are skipped without a divisibility test against $N$. The
-wheel of modulus $2 \cdot 3 \cdot 5 \cdot 7 \cdot 11 = 2310$ has
-$480$ residues coprime to all five small primes --- roughly $21\%$ of
-$2310$ --- so the sieve filters out about $79\%$ of candidates at
-essentially zero cost.
+Checking whether a candidate $p$ divides $N$ an expensive operation, so we want to do it as rarely as possible. The factor we are
+looking for is a large prime, and a prime is never a multiple of a
+smaller prime, so any $p$ divisible by $2$, $3$, $5$, $7$, or $11$
+can be thrown out at once, with no division by $N$. The integers
+that survive this filter repeats with period
+$2 \cdot 3 \cdot 5 \cdot 7 \cdot 11 = 2310$, and only $480$ of every
+$2310$ ($\approx 21\%$) survive. We precompute those $480$ surviving
+offsets once; each chunk then visits only the survivors and skips the
+remaining.
 
 \paragraph{Early termination.}
 The first thread to find $p \mid N$ sets a shared stop flag; all other
@@ -493,25 +496,23 @@ follows the empirical model
 \begin{equation}
   T_{\mathrm{bf}} \;\approx\;
   \frac{3.32 \times 10^{-9}}{\mathrm{threads}} \;\cdot\;
-  \mathrm{Gap}(\%) \;\cdot\; 2^n,
+  \mathrm{Gap}(\%) \;\cdot\; 2^{\lceil n/2 \rceil},
   \label{eq:bf-time}
 \end{equation}
-where $n$ is the bit length of the (smaller) factor and
+where $n$ is the bit length of the semi-prime ($N$) and
 $\mathrm{Gap}(\%)$ is the relative distance between
 $P_{\mathrm{centre}}$ and the true $P$. The exponential in $n$ is
-unavoidable; the only knob the annealer controls is the multiplicative
-prefactor.
+unavoidable; the only parameter the annealer controls is Gap(\%), indicative of solution quality.
 
 % =====================================================================
 \section{Results}\label{sec:results}
 % =====================================================================
 
-All experiments run on a single NVIDIA GH200 Grace Hopper Superchip
-(Hopper architecture, $\mathrm{sm}\_90$). The annealing kernel is
+All experiments run on a single NVIDIA GH200 Grace Hopper Superchip. The annealing kernel is
 compiled with \texttt{nvcc} (CUDA 12.x); QUBO construction and
 brute-force post-processing run on the Grace CPU side. Cooling
 schedule: geometric with $\alpha = 0.95$, $T_0$ auto-estimated at
-$\chi = 0.5$, $T_{\min} = 10^{-3}$, $10$ sweeps per $\beta$ step.
+$\chi = 0.6$, $T_{\min} = 10^{-3}$, $10$ sweeps per $\beta$ step.
 
 For each bit width $n \in \{16, 20, 24, \dots, 124, 128\}$ we
 generate a random $n$-bit semiprime $N = PQ$ with $P, Q$ random
@@ -522,7 +523,7 @@ ten times with independent seeds. Reported numbers use the winning
 \subsection{Per-iteration throughput}
 
 \figplaceholder{fig:throughput}{SA wall-clock per sweep iteration versus number of
-Ising spins, comparing the CUDA kernel on GH200, a PyTorch port on
+Ising spins, comparing the CUDA kernel on GH200, a PyTorch implementation on
 GH200, and the same PyTorch code on an Apple M2 Max via MPS. CUDA stays
 near $0.05$\,ms across four decades of spin count; the PyTorch
 variants drift upward past $10^3$ spins.}
@@ -530,10 +531,8 @@ variants drift upward past $10^3$ spins.}
 Figure~\ref{fig:throughput} compares wall-clock per sweep across
 the three implementations. The CUDA kernel stays near $0.05$\,ms per
 iteration across four orders of magnitude in spin count; the PyTorch
-port pays roughly $5\times$ that on the same GPU because its
-gather/scatter primitives cannot exploit the hub cache. The Mac MPS
-curve drifts upward earlier and faster, consistent with its lower
-memory bandwidth.
+implementation of graph colored simulated annealing, pays roughly $5\times$ that on the same GPU because its
+ primitives do not exploit the structure of the problem as we do in Section \ref{sec:sa-impl}.
 
 \subsection{End-to-end construction + anneal time}
 
@@ -559,33 +558,37 @@ $2.98\%$ for the centroid.}
 Figure~\ref{fig:quality} reports the relative gap between the
 predicted and the true factor for three estimators:
 \begin{enumerate}
-  \item $\sqrt{N}$ --- the uniform "I know nothing about the factors"
-    baseline. Mean gap $10.33\%$ over the tested range.
+  \item A naive estimate $\sqrt{N}$. Mean gap $10.33\%$ over the tested range.
   \item $P_{\mathrm{pred}}$ from the SA spin state directly. Mean gap
     $4.23\%$.
   \item The averaged centroid
     $\tfrac{1}{2}(P_{\mathrm{pred}} + \lfloor N / Q_{\mathrm{pred}} \rfloor)$.
     Mean gap $2.98\%$.
 \end{enumerate}
-Two facts matter for the next step. The SA output is consistently
-better than $\sqrt{N}$, but only by a small constant factor; and the
-free averaging step gains as much again. Both contribute the same
-multiplicative factor to the brute-force prefactor in
-Eq.~\eqref{eq:bf-time}.
 
 \subsection{Brute-force time as a function of gap}
 
 \figplaceholder{fig:bruteforce}{Time taken to find the exact factor by the wheel-sieve
 brute-force search, as a function of the raw gap between
-$P_{\mathrm{centre}}$ and the true $P$, on a $72$-thread CPU. Below a
-$\sim 10^5$ gap the search completes in milliseconds (sieve
-dominated); above $\sim 10^7$ it follows the $\mathrm{Gap} \cdot 2^n$
-prediction of Eq.~\eqref{eq:bf-time}.}
+$P_{\mathrm{centre}}$ and the true $P$, on the $72$-thread GH200 Grace
+CPU. For small gaps the whole search fits in a single parallel pass
+across the threads, so the time is roughly constant; once the gap
+exceeds what $72$ threads can cover in one pass the search effectively
+goes serial and the time climbs linearly, following the
+$\mathrm{Gap} \cdot 2^n$ model of Eq.~\eqref{eq:bf-time}.}
 
-Figure~\ref{fig:bruteforce} validates the timing model of
-Eq.~\eqref{eq:bf-time}. Below a gap of $\sim 10^5$ the search is
-sieve-dominated and finishes in milliseconds; above $\sim 10^7$ it
-scales linearly with the raw gap as predicted.
+Figure~\ref{fig:bruteforce} shows two regimes, both a consequence of the
+chunk-per-thread parallelism of Section~\ref{sec:bruteforce}. The search
+hands out fixed-size chunks to the $72$ hardware threads of the GH200
+Grace CPU. When the gap is small, the entire search space is only a
+handful of chunks: every thread takes at most one, and a single parallel
+pass already brackets the true factor. The time is then just the fixed
+cost of that one pass, independent of the exact gap --- the flat region
+below a gap of $\sim 10^5$. Once the gap grows past what $72$ threads can
+cover at once, the threads run out and must work through the surplus
+chunks in successive rounds; the search effectively becomes serial, and
+the time grows linearly with the gap, matching the
+$\mathrm{Gap} \cdot 2^n$ term of Eq.~\eqref{eq:bf-time}.
 
 \subsection{$\sim 100$-bit end-to-end case study}
 
@@ -618,7 +621,6 @@ $P = 573\,858\,364\,692\,161$ and $Q = 726\,223\,323\,360\,389$.
 
 \subsection{Limitations}\label{sec:limits}
 
-Several caveats are worth being explicit about.
 
 \paragraph{Solution-quality gap grows with $n$.}
 The mean gap of $4.23\%$ (raw SA) is across $16$--$128$ bits; the
@@ -626,32 +628,15 @@ individual-instance gap is noisier at the upper end and we observed
 runs with $> 8\%$ gap at $120$+ bits. The $\sim 100$-bit case study is
 representative, not best-case.
 
-\paragraph{$128$-bit hard cap.}
-The QUBO construction code uses $\mathtt{\_\_uint128\_t}$ arithmetic
-throughout. Going beyond $128$ bits requires switching to a multi-word
-big-integer representation, with predictable but nontrivial code
-changes.
-
-\paragraph{Trial division is the wrong post-processing tool.}
+\paragraph{Brute-force scalability.}
 At cryptographic key sizes (1024+ bits), a $\mathrm{Gap} \cdot 2^n$
-brute-force cost is hopeless even with perfect predictions. The right
-question --- which we leave to future work --- is what
+brute-force cost quickly becomes unfeasible. The right
+question, which we leave to future work, is what
 factor-finding algorithm best exploits a $P_{\mathrm{centre}}$ within
 a few percent of the truth. Pollard's $\rho$ and Lenstra's elliptic
 curve method are both candidates that benefit much more from a good
 starting point than linear scan does.
 
-\paragraph{Single-instance scope.}
-Each pipeline run targets one $N$. There is no notion of solving a
-batch of independent semiprimes in one schedule, even though the GH200
-has the memory for it. Batched annealing is a straightforward
-extension we have not yet attempted.
-
-\paragraph{This is not an RSA break.}
-The largest semiprime factored here is $\sim 100$ bits; production RSA
-moduli are $2048$ bits or larger. The point of the work is to measure
-how a carefully designed classical annealer scales on commodity GPU
-hardware, not to threaten deployed cryptography.
 
 \subsection{Future work}
 
