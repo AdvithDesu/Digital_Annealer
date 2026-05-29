@@ -73,65 +73,37 @@ the same hardware.
 \section{Introduction}\label{sec:intro}
 % =====================================================================
 
-Public-key cryptography assumes that some computational problems are
-asymptotically hard. RSA in particular assumes that recovering the two
-prime factors of a public modulus $N = PQ$ takes time exponential in
-the bit length of $N$. Shor's algorithm collapses this assumption on a
-fault-tolerant quantum computer, but the resource counts --- on the
-order of millions of physical qubits for cryptographically relevant key
-sizes~\cite{Jain2016} --- place that threat at least a decade
-out. Meanwhile, classical and quantum-inspired Ising machines have
-matured to the point where they routinely solve quadratic unconstrained
-binary optimization (QUBO) problems with $10^4$--$10^5$ variables, and
-recent work has factored integers as large as $2049$ bits on
-specialized hardware~\cite{XiniGuo2026}.
+The security of RSA rests on a single asymmetry: multiplying two large
+primes is easy, but recovering them from their product $N = PQ$ is, as
+far as we know, hard. Shor's algorithm~\cite{Shor1997} would erase that
+asymmetry on a fault-tolerant quantum computer, but the qubit counts
+needed at cryptographic key sizes remain on the order of
+millions~\cite{Jain2016} --- likely a decade or more away. That leaves a
+concrete near-term question: how far can ordinary classical hardware
+push integer factorization today?
 
-Integer factorization can be cast as a QUBO~\cite{Jiang2018,Wang2020}.
-The cleanest route is to write $N = PQ$ as a binary long
-multiplication, treat the unknown bits of $P$, $Q$ and the carries as
-binary variables, square the per-column constraints, and minimize the
-resulting energy. The ground state encodes the factors. Whether that
-ground state can actually be \emph{found} depends on three things: how
-clean the resulting QUBO is, how well the solver exploits its sparsity,
-and how the solver scales on the hardware it runs on.
+One promising route reframes the problem. Factoring $N = PQ$ can be cast
+as an optimization problem --- an Ising model whose lowest-energy spin
+configuration encodes the bits of $P$ and $Q$~\cite{Jiang2018,Wang2020}.
+Finding that ground state is then a job for an \emph{Ising machine}, a
+family of classical and quantum-inspired solvers already pushed to
+integers of thousands of bits~\cite{XiniGuo2026}. We attack it with
+simulated annealing --- a classical heuristic that slowly ``cools'' the
+system toward low-energy states --- in an end-to-end pipeline: build the
+Ising model for a given $N$, anneal it on a GPU to recover an
+approximate factor, and finish with a short classical search that turns
+that approximation into the exact one.
 
-This paper is about the second two. We treat the QUBO construction as
-support infrastructure and focus on a GPU-resident simulated annealer
-that has been shaped, end-to-end, by the structure of the Ising graphs
-that factorization produces. Three design choices carry the
-contribution:
-\begin{enumerate}
-  \item \textbf{Graph-colored parallel Metropolis.} A Welsh--Powell
-    coloring of the interaction graph partitions spins into
-    independent sets. Within a color, every spin's $\dE$ can be
-    computed and applied in parallel without invalidating the global
-    energy accumulator.
-  \item \textbf{Dense/sparse spin binning.} Empirically, only a small
-    set of "hub" spins (with row degree $\gtrsim 100$) attracts most
-    of the coupling weight, while the rest of the graph stays sparse.
-    The annealer routes the two populations through different kernels
-    --- block-level shared-memory reduction for hubs, warp-level
-    shuffle reduction for sparse spins --- sized to the GPU's actual
-    resources.
-  \item \textbf{Hub-tagged sparse CSR.} The high bit of each column
-    index in the sparse-spin CSR encodes whether the neighbor is a hub
-    (read from a shared-memory cache) or a non-hub (read from global
-    memory). The hot path is a single branchless shared-memory load.
-\end{enumerate}
-Together, these let one GH200 sweep a $\sim 10^5$-spin Ising graph at
-$\sim 0.1$\,ms per iteration, and factor a $\sim 100$-bit semiprime
-end-to-end in $416$\,s.
-
-Section~\ref{sec:formulation} casts factorization as a binary
-optimization problem and works through a small example.
-Section~\ref{sec:preproc} describes the classical simplification and
-quadrization that turns it into a sparse Ising model.
-Section~\ref{sec:scaling} shows how the structure of that model scales,
-which motivates the kernel design in Section~\ref{sec:sa}.
-Section~\ref{sec:bruteforce} describes the post-processing search that
-closes the residual gap. Section~\ref{sec:results} reports timing and
-solution-quality results across $16$--$128$-bit semiprimes, and
-Section~\ref{sec:discussion} discusses limits and next steps.
+The annealer is where the time goes, and it is where this paper
+concentrates. The Ising graphs that factorization produces are highly
+sparse: a handful of heavily connected ``hub'' spins carry most of the
+coupling weight, while the rest of the graph is thin. A solver blind to
+this structure leaves most of the GPU idle. We exploit it directly ---
+graph coloring to flip many spins in parallel, separate kernels for
+dense and sparse spins, and on-chip caching of the hub spins that nearly
+every other spin must read. On a single NVIDIA GH200 this factors a
+$\sim 100$-bit semiprime in $416$ seconds, an $8\times$ speedup over the
+same search seeded only by the $\sqrt{N}$ estimate.
 
 % =====================================================================
 \section{Integer factorization as a binary optimization problem}\label{sec:formulation}
@@ -637,20 +609,6 @@ a few percent of the truth. Pollard's $\rho$ and Lenstra's elliptic
 curve method are both candidates that benefit much more from a good
 starting point than linear scan does.
 
-
-\subsection{Future work}
-
-The bottleneck identified in Section~\ref{sec:limits} suggests several
-directions. \emph{Better QUBO encodings}: the simplification in
-Section~\ref{sec:preproc} is purely algebraic; symmetry-aware or
-sieve-aware reductions might collapse far more of the problem before
-SA sees it. \emph{Smarter post-processing}: Pollard's $\rho$, Lenstra
-ECM, or even GNFS sieving seeded by $P_{\mathrm{centre}}$ would
-exploit the annealer's output far more effectively than linear scan
-does. \emph{Hardware co-design}: the kernel structure described in
-Section~\ref{sec:sa} maps naturally onto coherent Ising machines and
-FPGA-based annealers, both of which provide higher coupling-update
-throughput than a GPU for the same energy budget.
 
 % =====================================================================
 \appendix
