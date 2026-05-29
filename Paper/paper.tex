@@ -2,7 +2,7 @@
 % GPU-Accelerated Graph-Colored Simulated Annealing for Integer Factorization
 % First draft -- figures are textual placeholders (see \figplaceholder)
 % =====================================================================
-\documentclass[reprint,twocolumn,amsmath,amssymb,floatfix,nofootinbib]{revtex4-2}
+\documentclass[reprint,twocolumn,amsmath,amssymb,nofootinbib]{revtex4-2}
 
 \usepackage{graphicx}
 \usepackage{amsmath}
@@ -25,10 +25,36 @@
     \label{#1}
   \end{figure}}
 \newcommand{\figplaceholderwide}[2]{%
-  \begin{figure*}[t]
+  \begin{figure*}[tp]
     \centering
     \fbox{\parbox[c][4.5cm][c]{0.95\textwidth}{\centering\itshape\small FIG: #2}}
     \caption{\textit{[placeholder]} #2}
+    \label{#1}
+  \end{figure*}}
+
+% Float placement: allow more / larger floats per page so the
+% image-heavy sections do not strand a figure at \clearpage.
+\setcounter{topnumber}{4}
+\setcounter{bottomnumber}{4}
+\setcounter{totalnumber}{8}
+\renewcommand{\topfraction}{0.95}
+\renewcommand{\bottomfraction}{0.95}
+\renewcommand{\textfraction}{0.05}
+\renewcommand{\floatpagefraction}{0.7}
+
+% --- Real figures. Args: label, image path, caption. ----------------
+\newcommand{\figimg}[3]{%
+  \begin{figure}[!htbp]
+    \centering
+    \includegraphics[width=\columnwidth]{#2}
+    \caption{#3}
+    \label{#1}
+  \end{figure}}
+\newcommand{\figimgwide}[3]{%
+  \begin{figure*}[!tp]
+    \centering
+    \includegraphics[width=\textwidth]{#2}
+    \caption{#3}
     \label{#1}
   \end{figure*}}
 
@@ -133,7 +159,7 @@ model that encodes $P$ and $Q$.
 \section{Classical pre-processing}\label{sec:preproc}
 % =====================================================================
 
-\begin{table*}[t]
+\begin{table*}[tp]
 \centering
 \caption{Binary long-multiplication table for $N = 391 = 17 \times 23$,
 with $P = (1\,p_3\,p_2\,p_1\,1)_2$ and
@@ -267,7 +293,7 @@ participates in and the diagonal trail comes from the carries
 $s_{i,j}$, which couple only to their immediate column neighbors.
 
 \paragraph{Hub spin count grows only with $\log N$.}
-\figplaceholder{fig:hubcount}{Number of total Ising spins versus number of
+\figimg{fig:hubcount}{Images/scaling of number of spins with N.png}{Number of total Ising spins versus number of
 densely connected hub spins as the bit
 width of $N$ grows to $\sim 128$. Total grows as
 $\bigO(n^3)$; hub count grows as $\bigO(\log N)$.}
@@ -312,7 +338,7 @@ where $L_i$ is the local field acting on spin $i$. The $\dE_i$ calculation
 therefore collapses to a single sparse dot product over spin
 $i$'s neighbour row.
 
-\figplaceholder{fig:deltaE}{Local-field evaluation of $\dE_i$. Each
+\figimg{fig:deltaE}{Images/Energy calculation in DA1.png}{Local-field evaluation of $\dE_i$. Each
 thread group loads spin $i$'s neighbour row from the CSR, multiplies
 each coupling $J_{ij}$ by the neighbour spin $\sigma_j$, reduces the
 products to the local field $L_i = \sum_j J_{ij}\sigma_j + h_i$, and
@@ -375,7 +401,7 @@ At the start of a pass, we copy their current values
 into the shared memory local to each thread group, where every group can
 read them cheaply. 
 
-\begin{algorithm}[t]
+\begin{algorithm}[!htbp]
   \caption{One-time setup before annealing}
   \label{alg:setup}
   Verify $J$ symmetry and zero diagonal\;
@@ -389,7 +415,7 @@ read them cheaply.
   Estimate $T_0 = \langle \dE^{+} \rangle / \ln(1/\chi)$, where $\chi$ is acceptance rate\;
 \end{algorithm}
 
-\begin{algorithm}[t]
+\begin{algorithm}[!htbp]
   \caption{Color-parallel simulated annealing loop}
   \label{alg:anneal}
   \ForEach{$\beta$ in the geometric schedule}{
@@ -494,7 +520,7 @@ ten times with independent seeds. Reported numbers use the winning
 
 \subsection{Per-iteration throughput}
 
-\figplaceholder{fig:throughput}{SA wall-clock per sweep iteration versus number of
+\figimg{fig:throughput}{Images/spins_vs_time_per_iteration_for_mac_gh200.png}{SA wall-clock per sweep iteration versus number of
 Ising spins, comparing the CUDA kernel on GH200, a PyTorch implementation on
 GH200, and the same PyTorch code on an Apple M2 Max via MPS. CUDA stays
 near $0.05$\,ms across four decades of spin count; the PyTorch
@@ -508,7 +534,7 @@ implementation of graph colored simulated annealing, pays roughly $5\times$ that
 
 \subsection{End-to-end construction + anneal time}
 
-\figplaceholder{fig:scaling}{Time to build $J$ and time to run one full annealing
+\figimg{fig:scaling}{Images/Construction and Annealing Time.png}{Time to build $J$ and time to run one full annealing
 schedule, both as a function of $n$ in $[16, 128]$ bits. Construction
 is sub-second up to $\sim 60$ bits and reaches $\sim 60$\,s at $128$
 bits. Annealing dominates above $\sim 60$ bits, reaching $\sim 220$\,s
@@ -521,7 +547,7 @@ which itself grows as $\bigO(n^3)$.
 
 \subsection{Solution quality}
 
-\figplaceholder{fig:quality}{Percentage gap between predicted and true $P$ as a
+\figimg{fig:quality}{Images/Percentage Gap between real and estimated P.png}{Percentage gap between predicted and true $P$ as a
 function of $n$, for three estimators: $\sqrt{N}$ (uniform baseline),
 $P_{\mathrm{pred}}$ from SA, and the averaged centroid
 $\tfrac{1}{2}(P_{\mathrm{pred}} + N / Q_{\mathrm{pred}})$. Means across
@@ -540,7 +566,7 @@ predicted and the true factor for three estimators:
 
 \subsection{Brute-force time as a function of gap}
 
-\figplaceholder{fig:bruteforce}{Time taken to find the exact factor by the wheel-sieve
+\figimg{fig:bruteforce}{Images/Raw gap vs Time taken to find solution.png}{Time taken to find the exact factor by the wheel-sieve
 brute-force search, as a function of the raw gap between
 $P_{\mathrm{centre}}$ and the true $P$, on the $72$-thread GH200 Grace
 CPU. For small gaps the whole search fits in a single parallel pass
