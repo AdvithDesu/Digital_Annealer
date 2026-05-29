@@ -796,10 +796,8 @@ the annealing loop, so the cost is at most one full sweep per
 configuration. Cooling is geometric with $\alpha = 0.95$; the schedule
 runs until $T < 10^{-3}$.
 
-\subsection{Numerical scaffolding}\label{sec:sa-scaffolding}
+\subsection{Numerical correctness}\label{sec:sa-scaffolding}
 
-Two correctness checks and one bookkeeping invariant keep the run
-honest.
 \begin{description}
   \item[Symmetry check.] On load, the annealer samples random rows of
     the CSR and verifies that for every stored $(i, j, J_{ij})$ the
@@ -813,11 +811,6 @@ honest.
     accumulator is checked against a fresh full-state recomputation;
     relative drift stays below $10^{-9}$ for all problem sizes we
     tested.
-  \item[Best-state mirror.] A second device-side spin buffer mirrors
-    the live state whenever a new best running energy is observed.
-    The output spin file is written from this mirror, so the reported
-    state is the best one ever visited, not whatever happened to be
-    live at the final $T$ step.
 \end{description}
 
 % =====================================================================
