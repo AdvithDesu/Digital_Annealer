@@ -146,7 +146,7 @@ $n = \lceil \tfrac{1}{2}\log_2 N \rceil$. Write,
 Four bits are known a priori: $p_0 = q_0 = 1$ (as both factors are odd)
 and $p_{n-1} = q_{n-1} = 1$ (each is exactly $n$ bits).
 
-Multiplying these two binary numbers and matching the result against
+Multiplying $P$ and $Q$ in their binary representations and matching the result against
 the known bits of $N$ turns factorization into a constraint satisfaction
 problem. We adopt the column-based multiplication-table formulation, and the
 classical bit-reduction rules that accompany it, from Jiang \emph{et
@@ -197,13 +197,13 @@ $N = 391$   & $1$ & $1$ & $0$ & $0$ & $0$ & $0$ & $1$ & $1$ & $1$ \\
 \end{tabular}
 \end{table*}
 
-Multiplying $P$ and $Q$ is done by long multiplication, Table~\ref{tab:multtable} lays it
+Multiplying $P$ and $Q$ is done using a multiplication table, Table~\ref{tab:multtable} lays it
 out for $N = 391 = 17 \times 23$. The cross-terms $p_a q_b$
 land in the column of place value $2^{a+b}$. The contribution of a
 given place value to the product is the sum of every entry in its
 column.
 
-That column sum can exceed one, so there would be a carry into higher columns. We make these carries explicit as
+Since that column sum can exceed one, there would be a carry into higher columns. We make these carries explicit as
 binary variables: $s_{i,j} \in \{0,1\}$ is the bit of column $i$'s
 carry that arrives in column $j > i$, where it contributes with weight
 $2^{j-i}$. Every column thus receives carries from lower columns
@@ -222,7 +222,7 @@ equation per column:
 \end{equation}
 The true factors are the unique
 bit assignment for which every column is balanced, i.e.\ $C_i = 0$ for all
-$i$. Squaring each clause and summing it gives us the energy function as,
+$i$. Squaring each clause and summing it gives us the energy function:
 \begin{equation}
   E(\{p_i, q_i, s_{ij}\}) \;=\; \sum_i C_i^2,
   \label{eq:energy}
@@ -230,7 +230,7 @@ $i$. Squaring each clause and summing it gives us the energy function as,
 whose global minimum $E = 0$ encodes the true factors $P$ and $Q$.
 
 Squaring \eqref{eq:Ci} directly, however, produces a polynomial with a large number of terms. Before handing the problem to the
-annealer, we eliminate as many variables and as much redundancy as
+annealer, we try to eliminate as many variables and as much redundancy as
 possible using deterministic algebraic rules~\cite{Jiang2018}.
 
 \subsection{Reduction rules}\label{sec:rules}
@@ -239,8 +239,8 @@ A small set of deterministic rules is enough to drive most carries and
 several factor bits to fixed values, or to rewrite one bit as an
 expression in others. We use seven such rules: the saturated-sum,
 zero-sum, doubling, coefficient-bound,
-complement, parity and replacementrules. The simplifier applies them in a fixed
-priority order, looping until no rule fires on any clause. They are detailed in Appendix~\ref{app:rules}.
+complement, parity and replacement rules. The simplifier applies them in a fixed
+priority order, looping until no rule fires on any column clause. They are detailed in Appendix~\ref{app:rules}.
 
 \subsection{Quadrization}\label{sec:quad}
 
@@ -258,17 +258,21 @@ cubic case, and the two variants of the quartic case, are standard and whose imp
 \subsection{From QUBO to Ising}\label{sec:qubotoising}
 
 A linear change of variables $\sigma_i = 1 - 2 x_i$ maps each binary
-$x_i \in \{0,1\}$ to an Ising spin $\sigma_i \in \{-1, +1\}$. The QUBO
-$H = \sum_i Q_{ii} x_i + \sum_{i < j} Q_{ij} x_i x_j$ becomes
+$x_i \in \{0,1\}$ to an Ising spin $\sigma_i \in \{-1, +1\}$. We store
+$Q$ in symmetric form ($Q_{ij} = Q_{ji}$), with the energy function then being represented as,
+\begin{equation}
+  H = \sum_i Q_{ii} x_i + \sum_{i \neq j} Q_{ij} x_i x_j.
+\end{equation}
+Substituting $x_i = (1 - \sigma_i)/2$ gives
 \begin{equation}
   H(\boldsymbol\sigma) = \sum_i h_i \sigma_i
-                       + \sum_{i<j} J_{ij} \sigma_i \sigma_j
+                       + \sum_{i \neq j} J_{ij} \sigma_i \sigma_j
                        + \text{const.},
 \end{equation}
-Treating $Q$ symmetrically, ($Q_{ij} = Q_{ji}$ for $i \neq j$),
+with the coupling and field taken over the full (symmetric) sum,
 \begin{equation}
   J_{ij} = \tfrac{1}{4} Q_{ij}, \quad
-  h_i    = -\tfrac{1}{2} Q_{ii} - \tfrac{1}{4} \sum_{j \neq i} Q_{ij}.
+  h_i    = -\tfrac{1}{2} \sum_{j} Q_{ij}.
 \end{equation}
 The Ising form of the factorization problem is what we use throughout.
 
@@ -278,30 +282,33 @@ The Ising form of the factorization problem is what we use throughout.
 
 
 \paragraph{The coupling matrix is sparse, and stays sparse.}
-\figplaceholderwide{fig:sparsity}{Sparsity of $J_{ij}$ at $N=39\,203$ (162 spins),
-$159\,197$ (379), $338\,699$ (563), and $377\,977$ (902). Most
-nonzeros concentrate in a small band along the top rows / left
-columns, with a thin diagonal tail. Pattern persists across
-orders of magnitude in $N$.}
+\begin{figure*}[tp]
+  \centering
+  \includegraphics[width=0.32\textwidth]{Images/Sparsity of J matrix for 162 BQM.png}\hfill
+  \includegraphics[width=0.32\textwidth]{Images/Sparsity of J matrix for 379 BQM.png}\hfill
+  \includegraphics[width=0.32\textwidth]{Images/Sparsity of J matrix for 563 BQM.png}
+  \caption{Sparsity of $J_{ij}$ at $N=39\,203$ (162 spins),
+  $159\,197$ (379), and $338\,699$ (563). Most
+  nonzeros concentrate in a small band along the top rows / left
+  columns, with a thin diagonal tail. Pattern persists across
+  orders of magnitude in $N$.}
+  \label{fig:sparsity}
+\end{figure*}
 Figure~\ref{fig:sparsity} plots the nonzero structure of $J_{ij}$
-for four representative semiprimes. Two visual features dominate every
-panel: a small dense block of "hub" rows / columns near index zero,
-and a long thin diagonal trail. The dense block corresponds to
+for three representative semiprimes. The dense block corresponds to
 auxiliary $w$-variables introduced during quadrization
 (Section~\ref{sec:quad}), each of which couples to every clause it
 participates in and the diagonal trail comes from the carries
-$s_{i,j}$, which couple only to their immediate column neighbors.
+$s_{i,j}$.
 
-\paragraph{Hub spin count grows only with $\log N$.}
 \figimg{fig:hubcount}{Images/scaling of number of spins with N.png}{Number of total Ising spins versus number of
 densely connected hub spins as the bit
-width of $N$ grows to $\sim 128$. Total grows as
-$\bigO(n^3)$; hub count grows as $\bigO(\log N)$.}
+width of $N$ grows to $\sim 128$.}
 Figure~\ref{fig:hubcount}
 
 \paragraph{CSR storage.}
 We store $J$ in Compressed Sparse Row
-(CSR) format: a \texttt{row\_ptr} of $N+1$ row offsets, a
+(CSR) format~\cite{Saad2003}: a \texttt{row\_ptr} of $N+1$ row offsets, a
 \texttt{col\_idx} array of column indices, and a \texttt{values} array
 of the nonzeros. Memory is $\bigO(N + \mathrm{nnz})$ rather than
 $\bigO(N^2)$. Here, $\mathrm{nnz}$ is the number of nonzeros values in the matrix.
@@ -312,8 +319,7 @@ $\bigO(N^2)$. Here, $\mathrm{nnz}$ is the number of nonzeros values in the matri
 
 The annealer is a Metropolis sampler that tries to flip every spin
 once per sweep, accepting flips with probability
-$\min(1, e^{-\beta \dE_i})$. The serial cost of one sweep is
-$\bigO(\mathrm{nnz})$. To turn that into wall-clock time on a GPU we
+$\min(1, e^{-\beta \dE_i})$. To fully make use of the parallelism of a GPU we
 need three things: a way to flip many spins in parallel without
 breaking the energy bookkeeping, kernels whose work pattern matches
 GPU resources, and a memory layout that keeps the highly accessed data in fast
@@ -322,9 +328,9 @@ storage.
 \subsection{Computing $\Delta E$ from local fields}\label{sec:sa-deltaE}
 
 Each Metropolis test needs the energy change $\dE_i$ that flipping
-spin $i$ would cause. The obvious way to get it is to evaluate the
+spin $i$ would cause. The straightforward way to calculate it is to evaluate the
 total energy of the current state, flip the spin, evaluate the total
-energy again, and subtract. This is not effecient. 
+energy again, and subtract. This however, is not effecient. 
 
 Flipping a single spin, changes only the energy terms that
 involve that spin. Writing the Ising energy as
@@ -346,8 +352,8 @@ returns $\dE_i = -2\sigma_i L_i$. One group per spin lets all $N$
 differences be evaluated in a single parallel pass.}
 
 
-This local-field form is what makes the annealer a good fit for a GPU.
-Because $L_i$ depends only on the current configuration and never on
+This local-field form is what makes the GPU useful.
+Since $L_i$ depends only on the current configuration and never on
 another candidate's flip, the $\dE_i$ of all $N$ spins are mutually
 independent and can be evaluated in a single parallel pass, with one
 thread group reducing each spin's neighbour row (Figure~\ref{fig:deltaE}.
@@ -367,15 +373,13 @@ what graph coloring provides.
 \subsection{Why parallel Metropolis needs graphcoloring}\label{sec:sa-coloring}
 
 Coloring of the interaction graph (nodes = spins, edges =
-nonzero $J_{ij}$) produces these mutually-uncoupled sets we look for. It
+nonzero $J_{ij}$) produces the mutually-uncoupled sets we look for. It
 partitions the spins into independent sets (colors) such that no two
 same-color spins are coupled ($J_{ij} = 0$ for all $i,j$ of the same
 color). All spins of one color can then
 be flipped in parallel: each one's $\dE$ depends only on spins of
 other colors, which are unchanged during this color's
-pass. Sweeping every color in sequence gives a full Metropolis sweep
-with no synchronization inside a color and one synchronization between
-colors.
+pass. Sweeping every color in sequence gives us a full Metropolis sweep.
 
 We compute the coloring once at setup using the Welsh--Powell greedy
 heuristic~\cite{WelshPowell1967}.
@@ -477,14 +481,14 @@ Each thread repeatedly claims the next chunk through a
 shared atomic counter.
 
 \paragraph{Wheel sieve.}
-Checking whether a candidate $p$ divides $N$ an expensive operation, so we want to do it as rarely as possible. The factor we are
+Checking whether a candidate $p$ divides $N$ is an expensive operation, so we want to do it as rarely as possible. The factor we are
 looking for is a large prime, and a prime is never a multiple of a
-smaller prime, so any $p$ divisible by $2$, $3$, $5$, $7$, or $11$
+smaller prime, so any candidate $p$ divisible by $2$, $3$, $5$, $7$, or $11$
 can be thrown out at once, with no division by $N$. The integers
 that survive this filter repeats with period
 $2 \cdot 3 \cdot 5 \cdot 7 \cdot 11 = 2310$, and only $480$ of every
-$2310$ ($\approx 21\%$) survive. We precompute those $480$ surviving
-offsets once; each chunk then visits only the survivors and skips the
+$2310$ ($\approx 21\%$) survive. We precompute those $480$ surviving integers once; 
+each chunk then performs the checks only on the survivors and skips the
 remaining.
 
 \paragraph{Early termination.}
@@ -515,44 +519,26 @@ $\chi = 0.6$, $T_{\min} = 10^{-3}$, $10$ sweeps per $\beta$ step.
 For each bit width $n \in \{16, 20, 24, \dots, 124, 128\}$ we
 generate a random $n$-bit semiprime $N = PQ$ with $P, Q$ random
 $\lceil n/2 \rceil$-bit primes, build the QUBO once, and run the SA
-ten times with independent seeds. Reported numbers use the winning
-(lowest-energy) seed; mean and spread are reported where useful.
+ten times with independent seeds. Reported numbers use the winning seed.
 
 \subsection{Per-iteration throughput}
 
 \figimg{fig:throughput}{Images/spins_vs_time_per_iteration_for_mac_gh200.png}{SA wall-clock per sweep iteration versus number of
 Ising spins, comparing the CUDA kernel on GH200, a PyTorch implementation on
-GH200, and the same PyTorch code on an Apple M2 Max via MPS. CUDA stays
-near $0.05$\,ms across four decades of spin count; the PyTorch
-variants drift upward past $10^3$ spins.}
+GH200, and the same PyTorch code on an Apple M2 Max via MPS.}
 
 Figure~\ref{fig:throughput} compares wall-clock per sweep across
 the three implementations. The CUDA kernel stays near $0.05$\,ms per
-iteration across four orders of magnitude in spin count; the PyTorch
-implementation of graph colored simulated annealing, pays roughly $5\times$ that on the same GPU because its
- primitives do not exploit the structure of the problem as we do in Section \ref{sec:sa-impl}.
-
-\subsection{End-to-end construction + anneal time}
+iteration across the spin count; the PyTorch
+implementation of graph colored simulated annealing, pays roughly $5\times$ that on the same GPU because its 
+primitives do not exploit the structure of the problem as we do in Section \ref{sec:sa-impl}.
 
 \figimg{fig:scaling}{Images/Construction and Annealing Time.png}{Time to build $J$ and time to run one full annealing
-schedule, both as a function of $n$ in $[16, 128]$ bits. Construction
-is sub-second up to $\sim 60$ bits and reaches $\sim 60$\,s at $128$
-bits. Annealing dominates above $\sim 60$ bits, reaching $\sim 220$\,s
-at $128$ bits.}
-Figure~\ref{fig:scaling} plots both wall-clock components against
-bit width. QUBO construction is dominated by the algebraic
-simplification at small $n$ and by the squaring + quadrization at
-large $n$; SA wall-clock scales roughly linearly with the spin count,
-which itself grows as $\bigO(n^3)$.
+schedule, both as a function of $n$ in $[16, 128]$ bits.}
+
 
 \subsection{Solution quality}
 
-\figimg{fig:quality}{Images/Percentage Gap between real and estimated P.png}{Percentage gap between predicted and true $P$ as a
-function of $n$, for three estimators: $\sqrt{N}$ (uniform baseline),
-$P_{\mathrm{pred}}$ from SA, and the averaged centroid
-$\tfrac{1}{2}(P_{\mathrm{pred}} + N / Q_{\mathrm{pred}})$. Means across
-the tested range: $10.33\%$ for $\sqrt{N}$, $4.23\%$ for raw SA, and
-$2.98\%$ for the centroid.}
 Figure~\ref{fig:quality} reports the relative gap between the
 predicted and the true factor for three estimators:
 \begin{enumerate}
@@ -564,31 +550,32 @@ predicted and the true factor for three estimators:
     Mean gap $2.98\%$.
 \end{enumerate}
 
+\figimg{fig:quality}{Images/Percentage Gap between real and estimated P.png}{Percentage gap between predicted and true $P$ as a
+function of $n$, for three estimators: $\sqrt{N}$ (baseline),
+$P_{\mathrm{pred}}$ from SA, and the averaged centroid
+$\tfrac{1}{2}(P_{\mathrm{pred}} + N / Q_{\mathrm{pred}})$.}
+
 \subsection{Brute-force time as a function of gap}
 
 \figimg{fig:bruteforce}{Images/Raw gap vs Time taken to find solution.png}{Time taken to find the exact factor by the wheel-sieve
 brute-force search, as a function of the raw gap between
 $P_{\mathrm{centre}}$ and the true $P$, on the $72$-thread GH200 Grace
-CPU. For small gaps the whole search fits in a single parallel pass
-across the threads, so the time is roughly constant; once the gap
-exceeds what $72$ threads can cover in one pass the search effectively
-goes serial and the time climbs linearly, following the
-$\mathrm{Gap} \cdot 2^n$ model of Eq.~\eqref{eq:bf-time}.}
+CPU.}
 
 Figure~\ref{fig:bruteforce} shows two regimes, both a consequence of the
 chunk-per-thread parallelism of Section~\ref{sec:bruteforce}. The search
-hands out fixed-size chunks to the $72$ hardware threads of the GH200
+hands out fixed-size chunks to the $72$ threads of the GH200
 Grace CPU. When the gap is small, the entire search space is only a
 handful of chunks: every thread takes at most one, and a single parallel
 pass already brackets the true factor. The time is then just the fixed
-cost of that one pass, independent of the exact gap --- the flat region
-below a gap of $\sim 10^5$. Once the gap grows past what $72$ threads can
+cost of that one pass, independent of the exact gap (the flat region
+below a gap of $\sim 10^5$). Once the gap grows past what $72$ threads can
 cover at once, the threads run out and must work through the surplus
 chunks in successive rounds; the search effectively becomes serial, and
 the time grows linearly with the gap, matching the
 $\mathrm{Gap} \cdot 2^n$ term of Eq.~\eqref{eq:bf-time}.
 
-\subsection{$\sim 100$-bit end-to-end case study}
+\subsection{$\sim 100$-bit end-to-end wall-clock time}
 
 For
 \[
@@ -609,8 +596,7 @@ the SA-guided pipeline reports:
 \end{tabular}
 \end{center}
 The naive $\sqrt{N}$-seeded baseline on the same $72$-thread CPU
-takes $3323.8$\,s, i.e.\ the SA pre-step buys an $8\times$ speedup
-end-to-end. The recovered factors are
+takes $3323.8$\,s. The recovered factors are
 $P = 573\,858\,364\,692\,161$ and $Q = 726\,223\,323\,360\,389$.
 
 % =====================================================================
@@ -641,30 +627,29 @@ starting point than linear scan does.
 \section{Reduction rules}\label{app:rules}
 % =====================================================================
 
-Every rule below acts on a single column clause --- a linear (or
+Every rule below acts on a single column clause, which is a linear (or
 low-degree) equation in binary variables $x_i \in \{0,1\}$. Each either
-\emph{fixes} a variable to a constant or \emph{links} it to an
-expression in the others; substituting the result back into the
+fixes a variable to a constant or links it to an
+expression in the others. Substituting the result back into the
 remaining clauses shrinks the problem. We group the rules by which of
-these two things they do, and close with the identity that makes
-squaring the energy well-behaved.
+these two things they do.
 
 \subsection{Rules that fix a variable}
 
 \paragraph{Saturated sum.}
 If $\sum_{i=1}^n x_i = n$ (all $n$ coefficients $+1$), then every
-$x_i = 1$ --- $n$ binary variables sum to $n$ only when all are one. The
+$x_i = 1$ (the $n$ binary variables sum to $n$ only when all are one). The
 sign-flipped form $\sum_i (-x_i) = -n$ gives the same conclusion.
 
 \paragraph{Zero sum.}
 If $\sum_{i=1}^n x_i = 0$ with same-sign coefficients, then every
-$x_i = 0$ --- a sum of non-negative terms vanishes only when each term
-does.
+$x_i = 0$ (a sum of non-negative terms vanishes only when each term
+equals to zero).
 
 \paragraph{Coefficient bound.}
 For a clause $\sum_i c_i x_i + C = 0$, let
 $S_+ = \sum_{c_i > 0} c_i$ and $S_- = \sum_{c_j < 0} |c_j|$. A single
-coefficient that exceeds the largest sum the opposing terms can muster
+coefficient that exceeds the largest sum the opposing terms can form,
 forces its variable:
 \begin{equation*}
   c_i > S_- - C \Rightarrow x_i = 0,
@@ -705,9 +690,9 @@ appears with coefficient $\pm 1$ in some clause, solves that clause for
 $s$, and substitutes the resulting expression into every other clause.
 Unlike the rules above it removes a variable unconditionally rather
 than only under a numeric condition, which makes it powerful but
-greedy --- a long chain of cascading replacements can fuse many small
-clauses into a single dense ``mega-clause'' whose square inflates the
-QUBO. We guard against this with a \emph{checkpoint}: the simplifier
+greedy, a long chain of cascading replacements can fuse many small
+clauses into a single dense clause whose square inflates the
+QUBO. We guard against this with a checkpoint: the simplifier
 saves its state before the first replacement and restores it if the
 chain fails to produce any new value assignments, so replacement is
 kept only when it actually shrinks the problem.
@@ -759,8 +744,8 @@ expensive, so we cache them once per color pass.
 
 Hub values for the entire problem are copied into a shared-memory
 array (at most $256$ bytes total) at the start of each sparse kernel
-launch. To resolve "is this neighbor a hub or not?" branchlessly, we
-\emph{tag} the column-index array of the sparse-only CSR: the high
+launch. To resolve ``is this neighbor a hub or not?" branchlessly, we
+tag the column-index array of the sparse-only CSR: the high
 bit of \texttt{col\_idx[k]} encodes the answer.
 \begin{itemize}
   \item High bit set: the low 31 bits are an index into the hub cache
@@ -783,8 +768,7 @@ The wrong $T_0$ wastes sweeps: too high and the run is effectively a
 random walk for many iterations; too low and the system freezes into
 the initial basin.
 
-We estimate $T_0$ adaptively, in the style of
-Ben-Ameur~\cite{BenAmeur2004}. Across $K = 10$ random spin
+We estimate $T_0$ adaptively, as done in~\cite{BenAmeur2004}. Across $K = 10$ random spin
 configurations we sample every spin's uphill $\dE$ (the energy cost of
 a single flip when it raises the energy), average them, and set
 \begin{equation}
