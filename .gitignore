@@ -41,3 +41,6 @@ __pycache__/
 *.acn
 *.acr
 *.alg
+
+#Paper
+Paper/
