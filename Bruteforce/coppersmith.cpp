@@ -130,14 +130,20 @@ static void build_matrix(const ZZ& a, const Params& P,
     }
 }
 
-// Find approximate real roots of g via Durand-Kerner; keep those within |x| <= Xb.
-static void find_real_roots(const ZZX& g, double Xb, vector<double>& out) {
-    long n = deg(g);
+// Find real roots (via Durand-Kerner) of the SCALED polynomial
+//   G(y) = sum_j coeff[j] y^j ,   y = x / X.
+// The lattice columns are X-scaled precisely so these coefficients are balanced
+// (all ~P^m), which makes double-precision root finding well-conditioned. The
+// true root is y0 = x0 / X in [-1, 1]; the caller recovers x0 = round(y0 * X).
+// Roots are kept within |y| <= ybound (slightly above 1 for safety margin).
+static void find_real_roots(const vector<double>& coeff, double ybound,
+                            vector<double>& out) {
+    long n = (long)coeff.size() - 1;
+    while (n >= 1 && coeff[n] == 0.0) n--;
     if (n < 1) return;
 
     vector<complex<double>> c(n + 1);
-    for (long j = 0; j <= n; j++)
-        c[j] = complex<double>(to_double(coeff(g, j)), 0.0);
+    for (long j = 0; j <= n; j++) c[j] = complex<double>(coeff[j], 0.0);
 
     complex<double> lead = c[n];
     if (abs(lead) == 0.0) return;
@@ -147,7 +153,7 @@ static void find_real_roots(const ZZX& g, double Xb, vector<double>& out) {
     complex<double> seed(0.4, 0.9), p(1.0, 0.0);
     for (long k = 0; k < n; k++) { p *= seed; r[k] = p; }
 
-    for (int it = 0; it < 200; it++) {
+    for (int it = 0; it < 300; it++) {
         double maxd = 0.0;
         for (long i = 0; i < n; i++) {
             // monic Horner: c[n]==1
@@ -160,12 +166,12 @@ static void find_real_roots(const ZZX& g, double Xb, vector<double>& out) {
             r[i] -= delta;
             maxd = max(maxd, abs(delta));
         }
-        if (maxd < 1e-9) break;
+        if (maxd < 1e-13) break;
     }
 
     for (long i = 0; i < n; i++) {
         double re = r[i].real(), im = r[i].imag();
-        if (fabs(im) < 1e-6 * (1.0 + fabs(re)) && fabs(re) <= Xb + 8.0)
+        if (fabs(im) < 1e-6 * (1.0 + fabs(re)) && fabs(re) <= ybound)
             out.push_back(re);
     }
 }
@@ -173,28 +179,29 @@ static void find_real_roots(const ZZX& g, double Xb, vector<double>& out) {
 // Test one block centred at 'a'. Returns true and sets 'outFactor' on success.
 static bool test_block(const ZZ& a, const Params& P, const ZZ& N,
                        const vector<ZZ>& Npow, const vector<ZZ>& Xpow,
-                       double Xbound, vector<vector<ZZ>>& fpow,
+                       double Xdouble, vector<vector<ZZ>>& fpow,
                        mat_ZZ& B, ZZ& outFactor) {
     build_matrix(a, P, Npow, Xpow, fpow, B);
     LLL_XD(B, 0.99);
 
-    ZZ c, x0, cand, rem;
-    vector<double> roots;
+    ZZ x0, cand, rem;
+    vector<double> coeff, roots;
     for (long row = 0; row < P.d; row++) {
-        ZZX g;
-        bool nonzero = false;
+        // Scaled coefficients straight from the (X-scaled) lattice row -> balanced.
+        coeff.assign(P.d, 0.0);
+        long hi = -1;
         for (long j = 0; j < P.d; j++) {
             if (IsZero(B[row][j])) continue;
-            if (!divide(c, B[row][j], Xpow[j])) continue;   // exact by construction
-            SetCoeff(g, j, c);
-            if (!IsZero(c)) nonzero = true;
+            coeff[j] = to_double(B[row][j]);
+            hi = j;
         }
-        if (!nonzero || deg(g) < 1) continue;
+        if (hi < 1) continue;
+        coeff.resize(hi + 1);
 
         roots.clear();
-        find_real_roots(g, Xbound, roots);
-        for (double rho : roots) {
-            long base = (long)llround(rho);
+        find_real_roots(coeff, 1.5, roots);          // roots in y = x/X
+        for (double y : roots) {
+            long base = (long)llround(y * Xdouble);   // back to x0
             for (long off = -4; off <= 4; off++) {
                 conv(x0, base + off);
                 cand = a + x0;
@@ -356,7 +363,7 @@ static int selftest(long bits, unsigned T) {
     // Coppersmith block, ~2^(bits/2-8)) so recovery happens within a handful of
     // blocks and returns instantly. This validates the lattice/root math.
     // To measure the real full-2% spiral, run the binary with a 2%-off guess.
-    long sbits = max(4L, bits / 2 - 8);
+    long sbits = max(4L, bits / 2 - 12);
     ZZ delta = RandomBnd(power2_ZZ(sbits));
     ZZ guess = (RandomBnd(2) == 0) ? p + delta : p - delta;
 
