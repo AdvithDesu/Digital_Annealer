@@ -387,25 +387,42 @@ int main(int argc, char** argv) {
         return selftest(bits, T);
     }
 
-    if (argc < 3) {
+    bool pq_mode = (argc >= 2 && string(argv[1]) == "-pq");
+
+    if ((pq_mode && argc < 5) || (!pq_mode && argc < 3)) {
         fprintf(stderr,
             "Usage: %s N guessP [threads] [m] [t] [safety]\n"
-            "       %s --selftest [bits=64] [threads]\n", argv[0], argv[0]);
+            "       %s -pq P Q guessP [threads] [m] [t] [safety]   (N = P*Q)\n"
+            "       %s --selftest [bits=64] [threads]\n",
+            argv[0], argv[0], argv[0]);
         return 1;
     }
 
     ZZ N, guess;
-    { stringstream ss(argv[1]); ss >> N; }
-    { stringstream ss(argv[2]); ss >> guess; }
+    int base;                       // index of first optional arg (threads)
+    if (pq_mode) {
+        ZZ p, q;
+        { stringstream ss(argv[2]); ss >> p; }
+        { stringstream ss(argv[3]); ss >> q; }
+        { stringstream ss(argv[4]); ss >> guess; }
+        N = p * q;
+        base = 5;
+        fprintf(stderr, "[pq-mode] N = ");
+        cerr << N << "\n";
+    } else {
+        { stringstream ss(argv[1]); ss >> N; }
+        { stringstream ss(argv[2]); ss >> guess; }
+        base = 3;
+    }
     if (N <= 3) { fprintf(stderr, "[error] N too small.\n"); return 1; }
 
-    unsigned T   = (argc > 3) ? (unsigned)atoi(argv[3])
-                              : max(1u, thread::hardware_concurrency());
+    unsigned T   = (argc > base)     ? (unsigned)atoi(argv[base])
+                                     : max(1u, thread::hardware_concurrency());
     Params P;
-    P.m    = (argc > 4) ? atol(argv[4]) : 4;
-    P.t    = (argc > 5) ? atol(argv[5]) : 4;
+    P.m    = (argc > base + 1) ? atol(argv[base + 1]) : 4;
+    P.t    = (argc > base + 2) ? atol(argv[base + 2]) : 4;
     P.beta = 0.49;
-    double safety = (argc > 6) ? atof(argv[6]) : 2.0;
+    double safety = (argc > base + 3) ? atof(argv[base + 3]) : 2.0;
     if (P.m < 1) P.m = 1;
     if (P.t < 1) P.t = 1;
     if (safety < 1.0) safety = 1.0;
