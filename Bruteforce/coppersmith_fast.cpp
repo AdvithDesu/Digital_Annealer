@@ -526,7 +526,7 @@ static u64 rand_prime(int bits, std::mt19937_64& rng) {
     }
 }
 
-static int selftest(int bits, unsigned T) {
+static int selftest(int bits, unsigned T, int m, int t) {
     std::mt19937_64 rng(0xC0FFEE);
     u64 p = rand_prime(bits, rng);
     u64 q = rand_prime(bits, rng);
@@ -536,12 +536,12 @@ static int selftest(int bits, unsigned T) {
     u64 delta = (rng() % ((u64)1 << sbits)) + 1;
     u128 guess = (rng() & 1) ? (u128)p + delta : (u128)p - delta;
 
-    fprintf(stderr, "[selftest] bits=%d  (small perturbation: correctness check)\n", bits);
+    fprintf(stderr, "[selftest] bits=%d  m=%d t=%d  (small perturbation: correctness check)\n", bits, m, t);
     std::cerr << "  p     = " << p << "\n  q     = " << q
               << "\n  N     = " << u128_str(N)
               << "\n  guess = " << u128_str(guess) << "  (|p-guess| = " << delta << ")\n";
 
-    Params P{1, 2, 0, 0, 0.49};
+    Params P{m, t, 0, 0, 0.49};
     int rc = run_search(N, guess, T, P, 2.0);
     if (rc == 0) fprintf(stderr, "[selftest] PASS (recovery validated)\n");
     return rc;
@@ -598,7 +598,9 @@ int main(int argc, char** argv) {
     if (argc >= 2 && std::string(argv[1]) == "--selftest") {
         int bits = (argc >= 3) ? atoi(argv[2]) : 64;
         unsigned T = (argc >= 4) ? (unsigned)atoi(argv[3]) : max(1u, std::thread::hardware_concurrency());
-        return selftest(bits, T);
+        int m = (argc >= 5) ? atoi(argv[4]) : 1;
+        int t = (argc >= 6) ? atoi(argv[5]) : 2;
+        return selftest(bits, T, m, t);
     }
 
     bool pq = (argc >= 2 && std::string(argv[1]) == "-pq");
