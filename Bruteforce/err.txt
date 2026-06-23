@@ -1,0 +1,5 @@
+[selftest] bits=50  (small perturbation: correctness check)
+  p     = 958968111531893
+  q     = 1082755971821191
+  N     = 1038328449547247085160089744563
+  guess = 958968111539501  (|p-guess| = 7608)
