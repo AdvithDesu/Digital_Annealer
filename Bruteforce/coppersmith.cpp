@@ -66,7 +66,12 @@ struct Params {
     long   d;        // lattice dimension = m + 1 + t
     long   deg;      // max polynomial degree = m + t
     double beta;     // P >= N^beta (0.49 default: covers slightly-imbalanced 64-bit factors)
+    double delta;    // LLL reduction quality (0.99 strong / 0.75 fast-weaker)
+    long   rows;     // # of reduced rows to root-test per block (root lives in the shortest)
 };
+
+// Grab this many spiral indices per atomic op (cuts counter contention at high rates).
+static constexpr unsigned long long CHUNK = 16;
 
 // --------------------------- global search state -------------------------
 static atomic<bool>               g_found{false};
@@ -182,11 +187,15 @@ static bool test_block(const ZZ& a, const Params& P, const ZZ& N,
                        double Xdouble, vector<vector<ZZ>>& fpow,
                        mat_ZZ& B, ZZ& outFactor) {
     build_matrix(a, P, Npow, Xpow, fpow, B);
-    LLL_XD(B, 0.99);
+    LLL_XD(B, P.delta);
 
     ZZ x0, cand, rem;
     vector<double> coeff, roots;
-    for (long row = 0; row < P.d; row++) {
+    // The Coppersmith root is carried by the shortest vector(s); after LLL those
+    // are the first rows. Testing only the first P.rows avoids ~D Durand-Kerner
+    // runs per block. (Selftest validates recovery still lands in block 0.)
+    long nrows = min(P.rows, (long)P.d);
+    for (long row = 0; row < nrows; row++) {
         // Scaled coefficients straight from the (X-scaled) lattice row -> balanced.
         coeff.assign(P.d, 0.0);
         long hi = -1;
@@ -225,25 +234,28 @@ static void worker(ZZ N, ZZ center, ZZ step, Params P,
     ZZ a, factor;
 
     while (!g_found.load(memory_order_relaxed)) {
-        unsigned long long k = g_next_k.fetch_add(1, memory_order_relaxed);
-        if (maxblocks && k >= maxblocks) return;
+        unsigned long long base = g_next_k.fetch_add(CHUNK, memory_order_relaxed);
+        for (unsigned long long k = base; k < base + CHUNK; k++) {
+            if (maxblocks && k >= maxblocks) return;
+            if (g_found.load(memory_order_relaxed)) return;
 
-        // Spiral: even k -> upward, odd k -> downward (closest blocks first).
-        if (k % 2 == 0) {
-            long half = (long)(k / 2);
-            a = center + step * conv<ZZ>(half);
-        } else {
-            long half = (long)((k + 1) / 2);
-            a = center - step * conv<ZZ>(half);
-        }
-        if (a <= 2 || a >= N) { g_blocks_done.fetch_add(1, memory_order_relaxed); continue; }
+            // Spiral: even k -> upward, odd k -> downward (closest blocks first).
+            if (k % 2 == 0) {
+                long half = (long)(k / 2);
+                a = center + step * conv<ZZ>(half);
+            } else {
+                long half = (long)((k + 1) / 2);
+                a = center - step * conv<ZZ>(half);
+            }
+            if (a <= 2 || a >= N) { g_blocks_done.fetch_add(1, memory_order_relaxed); continue; }
 
-        if (test_block(a, P, N, Npow, Xpow, Xbound, fpow, B, factor)) {
-            lock_guard<mutex> lk(g_factor_mtx);
-            if (!g_found.load()) { g_factor = factor; g_found.store(true); }
-            return;
+            if (test_block(a, P, N, Npow, Xpow, Xbound, fpow, B, factor)) {
+                lock_guard<mutex> lk(g_factor_mtx);
+                if (!g_found.load()) { g_factor = factor; g_found.store(true); }
+                return;
+            }
+            g_blocks_done.fetch_add(1, memory_order_relaxed);
         }
-        g_blocks_done.fetch_add(1, memory_order_relaxed);
     }
 }
 
@@ -303,8 +315,15 @@ static int run_search(const ZZ& N, const ZZ& guess, unsigned T,
         return 2;
     }
 
-    // X = 2^floor(Xbits)  (the lattice scaling / recoverable half-width)
-    ZZ Xscale = power2_ZZ((long)floor(Xbits));
+    // X = floor(2^Xbits)  (lattice scaling / recoverable half-width).
+    // Use the *full* fractional exponent, not 2^floor(Xbits): capturing the
+    // fractional bit is a free up-to-2x reduction in block count. The fractional
+    // part is carried with ~52 bits of precision via a rational multiply.
+    long     ip   = (long)floor(Xbits);
+    double   fp   = Xbits - (double)ip;                 // in [0,1)
+    uint64_t mult = (uint64_t)(pow(2.0, fp) * 4503599627370496.0);   // 2^fp * 2^52
+    ZZ Xscale = (power2_ZZ(ip) * conv<ZZ>((long)mult)) / power2_ZZ(52);
+    if (Xscale < 2) Xscale = power2_ZZ(max(1L, ip));
     // Block step = X / safety, so any factor lands well inside a block's radius.
     ZZ step = Xscale / conv<ZZ>((long)llround(safety));
     if (step < 1) set(step);
@@ -319,9 +338,9 @@ static int run_search(const ZZ& N, const ZZ& guess, unsigned T,
     fprintf(stderr,
         "[config] m=%ld t=%ld dim=%ld  beta=%.3f  log2(N)=%.1f\n"
         "         X ~ 2^%.1f (recoverable half-width)   step ~ 2^%.1f\n"
-        "         threads=%u  safety=%.1f%s\n",
+        "         threads=%u  safety=%.1f  delta=%.3f  rows=%ld%s\n",
         P.m, P.t, P.d, P.beta, log2N, Xbits, (double)NumBits(step), T, safety,
-        maxblocks ? "" : "  (unbounded: runs until P is found)");
+        P.delta, P.rows, maxblocks ? "" : "  (unbounded: runs until P is found)");
 
     auto t0 = chrono::steady_clock::now();
 
@@ -371,7 +390,7 @@ static int selftest(long bits, unsigned T) {
     cerr << p << "\n  q     = " << q << "\n  N     = " << N
          << "\n  guess = " << guess << "  (|p-guess| ~ 2^" << (double)NumBits(delta) << ")\n";
 
-    Params P{4, 4, 0, 0, 0.49};
+    Params P{4, 4, 0, 0, 0.49, 0.99, 3};
     int rc = run_search(N, guess, T, P, 2.0, /*maxblocks=*/0);
     if (rc == 0) fprintf(stderr, "[selftest] PASS (Coppersmith recovery validated)\n");
     return rc;
@@ -391,9 +410,11 @@ int main(int argc, char** argv) {
 
     if ((pq_mode && argc < 5) || (!pq_mode && argc < 3)) {
         fprintf(stderr,
-            "Usage: %s N guessP [threads] [m] [t] [safety]\n"
-            "       %s -pq P Q guessP [threads] [m] [t] [safety]   (N = P*Q)\n"
-            "       %s --selftest [bits=64] [threads]\n",
+            "Usage: %s N guessP [threads] [m] [t] [safety] [delta] [rows]\n"
+            "       %s -pq P Q guessP [threads] [m] [t] [safety] [delta] [rows]   (N = P*Q)\n"
+            "       %s --selftest [bits=64] [threads]\n"
+            "  delta : LLL quality 0.50..0.99 (lower = faster, weaker; default 0.99)\n"
+            "  rows  : reduced rows root-tested per block (default 3)\n",
             argv[0], argv[0], argv[0]);
         return 1;
     }
@@ -419,13 +440,17 @@ int main(int argc, char** argv) {
     unsigned T   = (argc > base)     ? (unsigned)atoi(argv[base])
                                      : max(1u, thread::hardware_concurrency());
     Params P;
-    P.m    = (argc > base + 1) ? atol(argv[base + 1]) : 4;
-    P.t    = (argc > base + 2) ? atol(argv[base + 2]) : 4;
-    P.beta = 0.49;
+    P.m     = (argc > base + 1) ? atol(argv[base + 1]) : 4;
+    P.t     = (argc > base + 2) ? atol(argv[base + 2]) : 4;
+    P.beta  = 0.49;
     double safety = (argc > base + 3) ? atof(argv[base + 3]) : 2.0;
+    P.delta = (argc > base + 4) ? atof(argv[base + 4]) : 0.99;
+    P.rows  = (argc > base + 5) ? atol(argv[base + 5]) : 3;
     if (P.m < 1) P.m = 1;
     if (P.t < 1) P.t = 1;
     if (safety < 1.0) safety = 1.0;
+    if (P.delta < 0.5 || P.delta > 0.999) P.delta = 0.99;
+    if (P.rows < 1) P.rows = 1;
 
     return run_search(N, guess, T, P, safety, /*maxblocks=*/0);
 }
