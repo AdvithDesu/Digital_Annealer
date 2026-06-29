@@ -13,14 +13,17 @@
 #   batch_logs/case_<bits>bit.log -- full per-case output (config + [search] + result)
 #
 # Usage:
-#   ./batch_coppersmith.sh [input.csv] [threads] [timeout_sec_per_case] [max_bits]
+#   ./batch_coppersmith.sh [input.csv] [threads] [timeout_sec_per_case] [max_bits] [label]
 # Defaults: input=all_runs.csv  threads=70  timeout=21600 (6h)  max_bits=52
+#           label = current timestamp (so runs NEVER overwrite each other)
 #   max_bits: skip any row whose 'bits' exceeds this (the big cases dominate time).
+#   label:    tags the output files -> coppersmith_results_<label>.csv,
+#             batch_logs_<label>/.  Pick a memorable name or let it default.
 #
 # Run detached (survives disconnect):
-#   nohup ./batch_coppersmith.sh all_runs.csv 70 21600 52 > batch.out 2>&1 &
-#   echo $! > batch.pid ; disown
-#   tail -f batch.out          # or: tail -f coppersmith_results.csv
+#   nohup ./batch_coppersmith.sh all_runs.csv 70 600 52 upto52 > batch_upto52.out 2>&1 &
+#   echo $! > batch_upto52.pid ; disown
+#   tail -f batch_upto52.out
 
 set -uo pipefail
 SD="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -29,20 +32,26 @@ INPUT="${1:-$SD/all_runs.csv}"
 THREADS="${2:-70}"
 TIMEOUT_PER="${3:-21600}"
 MAX_BITS="${4:-52}"
+LABEL="${5:-$(date +%Y%m%d_%H%M%S)}"
 
 # Tuned lattice params (from tune.sh on the GH200). Edit here if needed.
 M=5; T=5; SAFETY=1.3; DELTA=0.9; ROWS=3
 
-OUT="$SD/coppersmith_results.csv"
-LOGDIR="$SD/batch_logs"
+OUT="$SD/coppersmith_results_${LABEL}.csv"
+LOGDIR="$SD/batch_logs_${LABEL}"
 mkdir -p "$LOGDIR"
+
+if [ -e "$OUT" ]; then
+    echo "[error] $OUT already exists -- refusing to overwrite. Pick a new label." >&2
+    exit 1
+fi
 
 [ -x "$BIN" ]   || { echo "[error] binary not found/executable: $BIN" >&2; exit 1; }
 [ -f "$INPUT" ] || { echo "[error] input csv not found: $INPUT" >&2; exit 1; }
 command -v python3 >/dev/null || { echo "[error] python3 required (big-int arithmetic)" >&2; exit 1; }
 
 echo "bits,P,Q,P_guess,err_pct,P_found,Q_found,wall_s,status" > "$OUT"
-echo "[batch] input=$INPUT"
+echo "[batch] input=$INPUT  label=$LABEL"
 echo "[batch] bin=$BIN  threads=$THREADS  timeout=${TIMEOUT_PER}s/case  max_bits=$MAX_BITS"
 echo "[batch] params: m=$M t=$T safety=$SAFETY delta=$DELTA rows=$ROWS"
 echo "[batch] results -> $OUT   per-case logs -> $LOGDIR/"
