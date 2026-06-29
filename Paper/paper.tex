@@ -78,7 +78,7 @@ Indian Institute of Technology Madras, Chennai 600036, India}
 \date{\today}
 
 \begin{abstract}
-The security of RSA rests on the hardness of factoring a semiprime $N = PQ$. We present an end-to-end pipeline that maps factorization to a sparse Ising model, solve it on a single NVIDIA GH200 GPU with a graph-colored simulated annealer, and close the residual gap with a guided brute-force search. Together we are able to reliably able to factor $\sim 128$-bit semiprimes.
+The security of RSA rests on the hardness of factoring a semiprime $N = PQ$. We present an end-to-end pipeline that maps factorization to a sparse Ising model, solve it on a single NVIDIA GH200 GPU with a graph-colored simulated annealer, and close the residual gap with a guided brute-force search. Together we are able to reliably able to factor $128$-bit semiprimes.
 \end{abstract}
 
 \maketitle
@@ -336,7 +336,7 @@ where $n$ is the bit length of the semi-prime ($N$) and $\mathrm{Gap}(\%)$ is th
 
 All experiments run on a single NVIDIA GH200 Grace Hopper Superchip. The annealing kernel is compiled with \texttt{nvcc} (CUDA 12.x); QUBO construction and brute-force post-processing run on the Grace CPU side. Cooling schedule: geometric with $\alpha = 0.95$, $T_0$ auto-estimated at $\chi = 0.6$, $T_{\min} = 10^{-3}$, $10$ sweeps per $\beta$ step.
 
-For each bit width $n \in \{16, 20, 24, \dots, 124, 128\}$ we generate a random $n$-bit semiprime $N = PQ$ with $P, Q$ random $\lceil n/2 \rceil$-bit primes, build the QUBO once, and run the SA ten times with independent seeds. Reported numbers use the winning seed.
+For each factor bit length $n \in \{8, 10, 12, \dots, 62, 64\}$ (equivalently, $2n$-bit semiprimes $N = PQ$ ranging from $16$ to $128$ bits) we generate two random $n$-bit primes $P$ and $Q$, build the QUBO once, and run the SA ten times with independent seeds. Reported numbers use the winning seed.
 
 \subsection{Per-iteration throughput}
 
@@ -364,6 +364,10 @@ Figure~\ref{fig:quality} reports the relative gap between the predicted and the 
 
 Figure~\ref{fig:bruteforce} shows two regimes, both a consequence of the chunk-per-thread parallelism of Section~\ref{sec:bruteforce}. The search hands out fixed-size chunks to the $72$ threads of the GH200 Grace CPU. When the gap is small, the entire search space is only a handful of chunks: every thread takes at most one, and a single parallel pass already brackets the true factor. The time is then just the fixed cost of that one pass, independent of the exact gap (the flat region below a gap of $\sim 10^5$). Once the gap grows past what $72$ threads can cover at once, the threads run out and must work through the surplus chunks in successive rounds; the search effectively becomes serial, and the time grows linearly with the gap, matching the $\mathrm{Gap} \cdot 2^n$ term of Eq.~\eqref{eq:bf-time}.
 
+\subsection{Search with Coppersmith}\label{sec:coppersmith}
+
+The post-processing step is where solution quality matters most. Trial-division brute force around $P_{\mathrm{centre}}$ scales as $\mathrm{Gap}\cdot 2^n$ (Eq.~\eqref{eq:bf-time}); for a $128$-bit semiprime with the annealer's typical $\sim 2\%$ gap, this already projects to roughly $6$ months of CPU work on the $72$-thread GH200 host. Coppersmith's method~\cite{Coppersmith1997} gives us better scaling: built around lattice (LLL) reduction, it recovers a factor in polynomial time whenever an approximation of the factor $P$ lies within $N^{1/4}$ of the true value. Applying Coppersmith over an outward-spiralling grid of overlapping lattice windows (each of half-width $\sim N^{1/4}$) around the annealer's $P_{\mathrm{centre}}$ pulls the same $128$-bit instance down to approximately $21$\,hours on the same hardware, a $\sim 200\times$ improvement on the brute-force projection.
+
 \subsection{100-bit end-to-end wall-clock time}
 
 The following example is a randomly generated $100$-bit semiprime, with $P$ and $Q$ being random $50$-bit primes. We have,
@@ -378,9 +382,12 @@ the SA-guided pipeline reports:
   \midrule
   Build $J$ matrix (CSR)              & $25.3$\,s \\
   Simulated annealing ($\alpha = 0.95$, auto $T_0$) & $122.8$\,s \\
-  Brute-force from $P_{\mathrm{centre}} = 5.79 \times 10^{14}$ & $267.9$\,s \\
   \midrule
-  \textbf{Total}                      & $\mathbf{416.0}$\,\textbf{s} \\
+  Brute-force from $P_{\mathrm{centre}} = 5.79 \times 10^{14}$ & $267.9$\,s \\
+  Coppersmith from $P_{\mathrm{centre}}$ & $60.62$\,s \\
+  \midrule
+  \textbf{Total (brute-force)}        & $\mathbf{416.0}$\,\textbf{s} \\
+  \textbf{Total (Coppersmith)}        & $\mathbf{208.7}$\,\textbf{s} \\
   \bottomrule
 \end{tabular}
 \end{center}
@@ -394,9 +401,13 @@ We presented an end-to-end pipeline that factors a semiprime $N = PQ$ by encodin
 
 We show that the optimization-based, annealing-driven route to factoring is a reasonably efficient classical alternative when its implementation respects the structure of the underlying problem. The remaining bottleneck is no longer per-spin compute but the quality of the solution the annealer returns.
 
-The post-processing step is where this matters most. Trial-division brute force around $P_{\mathrm{centre}}$ scales as $\mathrm{Gap}\cdot 2^n$ (Eq.~\eqref{eq:bf-time}); for a $128$-bit semiprime with the annealer's typical $\sim 2\%$ gap, this already projects to roughly $6$ months of CPU work on the $72$-thread GH200 host --- prohibitive even at this modest size. Coppersmith's method~\cite{Coppersmith1997} sidesteps the exponential: built around lattice (LLL) reduction, it recovers a factor in polynomial time whenever an approximation lies within $N^{1/4}$ of the true value. Applying Coppersmith over an outward-spiralling grid of overlapping lattice windows (each of half-width $\sim N^{1/4}$) around the annealer's $P_{\mathrm{centre}}$ pulls the same $128$-bit instance down to approximately $21$\,hours on the same hardware --- a $\sim 200\times$ improvement on the brute-force projection from a single data point.
+The natural target to focus on is the annealer quality, being reliably able to land $P_{\mathrm{pred}}$ within $N^{1/4}$ of the true factor. At that point, the spiralling grid of Coppersmith windows (Section~\ref{sec:coppersmith}) collapses to a single lattice reduction that recovers $P$ in polynomial time, putting the pipeline as a whole within reach of polynomial-time prime factorization.
 
-Coppersmith is only one such partner. Other classical algorithms that genuinely consume an approximate factor, rather than scan linearly around it, are likely candidates as well, and pairing the annealer with such methods --- alongside continued improvement in its own solution quality --- is the natural path to larger bit widths.
+% =====================================================================
+\section*{Data Availability}
+% =====================================================================
+
+The full implementation of the pipeline described in this paper: the QUBO construction, the GPU graph-colored simulated annealer, the brute-force post-processing, and the Coppersmith-based post-processing, together with the benchmark scripts used to generate the reported results, is available at \url{https://github.com/AdvithDesu/Digital_Annealer}. For every factor bit length $n$ reported, the test instances are generated by sampling two independent primes $P$ and $Q$ uniformly at random from $[2^{n},\, 2^{n + 1})$ via \texttt{sympy.randprime}, so that each factor is exactly $n$ bits, and setting $N = PQ$ (a $2n$-bit semiprime).
 
 \newpage
 
