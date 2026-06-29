@@ -262,14 +262,20 @@ static void worker(ZZ N, ZZ center, ZZ step, Params P,
 static void monitor(ZZ step, double Xbits) {
     using namespace std::chrono;
     auto t0 = steady_clock::now();
+    auto last_print = t0;
     unsigned long long last = 0;
-    while (!g_found.load()) {
-        this_thread::sleep_for(seconds(5));
-        if (g_found.load()) break;
+    // Poll the found-flag often (so the program exits promptly when a factor is
+    // found -- no 5s shutdown floor), but only PRINT progress every ~5s.
+    while (!g_found.load(memory_order_relaxed)) {
+        this_thread::sleep_for(milliseconds(200));
+        auto now = steady_clock::now();
+        double since = duration<double>(now - last_print).count();
+        if (since < 5.0) continue;
         unsigned long long done = g_blocks_done.load();
-        double secs = duration<double>(steady_clock::now() - t0).count();
-        double rate = (done - last) / 5.0;
+        double secs = duration<double>(now - t0).count();
+        double rate = (done - last) / since;
         last = done;
+        last_print = now;
         // current spiral radius ~ (k/2)*step ; report its bit-length
         unsigned long long k = g_next_k.load();
         ZZ radius = step * conv<ZZ>((long)(k / 2 + 1));

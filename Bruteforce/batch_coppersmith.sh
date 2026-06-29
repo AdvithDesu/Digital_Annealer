@@ -13,11 +13,12 @@
 #   batch_logs/case_<bits>bit.log -- full per-case output (config + [search] + result)
 #
 # Usage:
-#   ./batch_coppersmith.sh [input.csv] [threads] [timeout_sec_per_case]
-# Defaults: input=all_runs.csv  threads=70  timeout=21600 (6h)
+#   ./batch_coppersmith.sh [input.csv] [threads] [timeout_sec_per_case] [max_bits]
+# Defaults: input=all_runs.csv  threads=70  timeout=21600 (6h)  max_bits=52
+#   max_bits: skip any row whose 'bits' exceeds this (the big cases dominate time).
 #
 # Run detached (survives disconnect):
-#   nohup ./batch_coppersmith.sh all_runs.csv 70 21600 > batch.out 2>&1 &
+#   nohup ./batch_coppersmith.sh all_runs.csv 70 21600 52 > batch.out 2>&1 &
 #   echo $! > batch.pid ; disown
 #   tail -f batch.out          # or: tail -f coppersmith_results.csv
 
@@ -27,6 +28,7 @@ BIN="${BIN:-$SD/coppersmith}"
 INPUT="${1:-$SD/all_runs.csv}"
 THREADS="${2:-70}"
 TIMEOUT_PER="${3:-21600}"
+MAX_BITS="${4:-52}"
 
 # Tuned lattice params (from tune.sh on the GH200). Edit here if needed.
 M=5; T=5; SAFETY=1.3; DELTA=0.9; ROWS=3
@@ -41,14 +43,19 @@ command -v python3 >/dev/null || { echo "[error] python3 required (big-int arith
 
 echo "bits,P,Q,P_guess,err_pct,P_found,Q_found,wall_s,status" > "$OUT"
 echo "[batch] input=$INPUT"
-echo "[batch] bin=$BIN  threads=$THREADS  timeout=${TIMEOUT_PER}s/case"
+echo "[batch] bin=$BIN  threads=$THREADS  timeout=${TIMEOUT_PER}s/case  max_bits=$MAX_BITS"
 echo "[batch] params: m=$M t=$T safety=$SAFETY delta=$DELTA rows=$ROWS"
 echo "[batch] results -> $OUT   per-case logs -> $LOGDIR/"
 echo
 
 # Strip CR (Windows line endings), skip header, iterate rows.
 tr -d '\r' < "$INPUT" | tail -n +2 | while IFS=, read -r bits Praw Qraw Ppraw Qpraw; do
-    [ -z "${bits// /}" ] && continue   # skip blank lines
+    bits="$(printf '%s' "$bits" | tr -dc '0-9')"   # clean to pure integer
+    [ -z "$bits" ] && continue                     # skip blank lines
+    if [ "$bits" -gt "$MAX_BITS" ]; then
+        echo "[batch] bits=$bits > max_bits=$MAX_BITS -> skipping"
+        continue
+    fi
 
     # Normalize (sort) + compute N and guess with big-int python.
     vals=$(python3 -c "
