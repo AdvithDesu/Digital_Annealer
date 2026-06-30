@@ -2,9 +2,9 @@
 %% Springer Nature (sn-jnl) version of:
 %% GPU-Accelerated Graph-Colored Simulated Annealing for Integer Factorization
 %% Target journal: Multidimensional Systems and Signal Processing
-%% (Springer; Vancouver-style numbered references via sn-mathphys-num.bst)
+%% (Springer; APA v7 author-year references via sn-apacite.bst)
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\documentclass[pdflatex,sn-mathphys-num]{sn-jnl}% Math and Physical Sciences Numbered Reference Style
+\documentclass[pdflatex,sn-apa]{sn-jnl}% APA Reference Style (author-year, per MSSP guidelines)
 
 %%%% Standard Springer template packages
 \usepackage{graphicx}%
@@ -22,6 +22,13 @@
 % (algorithm2e is self-contained and does not need the algorithm package).
 \usepackage[ruled,vlined,linesnumbered]{algorithm2e}%
 \usepackage{listings}%
+% Force pending floats (figures/algorithms) to flush at section boundaries.
+% This keeps Algorithms 1 and 2 inside Section 5 instead of drifting into Section 6
+% under the single-column Springer layout's tight float queue.
+\usepackage{placeins}%
+% Limit PDF bookmark tree to subsubsection level (3) so \paragraph{} lead-ins
+% don't trigger "Difference between bookmark levels" warnings. Cosmetic only.
+\hypersetup{bookmarksdepth=3}%
 
 %% as per the requirement new theorem styles can be included as shown below
 \theoremstyle{thmstyleone}%
@@ -67,21 +74,23 @@
 %% FamilyName -> \sur{Desu}
 %%=============================================================%%
 
-\author*[1]{\fnm{Advith} \sur{Desu}}\email{author1@example.com}
+\author*[1]{\fnm{Advith} \sur{Desu}}\email{advith27@gmail.com}
 
-\author[1]{\fnm{Aryan} \sur{Namboodri}}\email{author2@example.com}
+\author[1]{\fnm{Aryan} \sur{Namboodiri}}\email{ee22b012@smail.iitm.ac.in}
 
-\author[1]{\fnm{Anil} \sur{Prabhakar}}\email{author3@example.com}
+\author[1,2]{\fnm{Anil} \sur{Prabhakar}}\email{anil@ee.iitm.ac.in}
 
 \affil*[1]{\orgdiv{Centre for Quantum Information, Communication and Computing}, \orgname{Indian Institute of Technology Madras}, \orgaddress{\city{Chennai}, \postcode{600036}, \country{India}}}
 
+\affil[2]{\orgdiv{Department of Electrical Engineering}, \orgname{Indian Institute of Technology Madras}, \orgaddress{\city{Chennai}, \postcode{600036}, \country{India}}}
+
 %%==================================%%
-%% Unstructured abstract            %%
+%% Unstructured abstract (~150 words, per MSSP guidelines 150-250).
 %%==================================%%
 
-\abstract{The security of RSA rests on the hardness of factoring a semiprime $N = PQ$. We present an end-to-end pipeline that maps factorization to a sparse Ising model, solve it on a single NVIDIA GH200 GPU with a graph-colored simulated annealer, and close the residual gap with a guided brute-force search. Together we are able to reliably able to factor $128$-bit semiprimes.}
+\abstract{The security of RSA rests on the hardness of factoring a semiprime $N = PQ$. We present an end-to-end pipeline that turns this into an optimization problem: factorization is mapped to a sparse Ising model whose lowest-energy spin configuration encodes the bits of $P$ and $Q$. We solve this model on a single NVIDIA GH200 GPU using a graph-colored simulated annealer designed around the sparsity of the underlying coupling matrix. To maximize efficiency, we use graph coloring to let multiple spins update in parallel without breaking the energy bookkeeping along with optimal assignment of per spin energy calculation on the threads in the GPU to maximize efficiency. The annealer rarely lands exactly on the ground state but consistently gets close, and a guided post-processing search: wheel-sieve brute force, or Coppersmith's lattice method closes the residual distance. The full pipeline reliably factors $128$-bit semiprimes on a single GPU host.}
 
-\keywords{integer factorization, simulated annealing, Ising model, GPU computing, graph coloring}
+\keywords{Integer Factorization, Simulated Annealing, Ising model, GPU Computing}
 
 \maketitle
 
@@ -89,9 +98,9 @@
 \section{Introduction}\label{sec:intro}
 % =====================================================================
 
-Multiplying two large primes is easy; recovering them from their product $N = PQ$ is hard. This one-way asymmetry is the foundation of RSA, the most widely deployed public-key cryptosystem~\cite{RSA1978}. Shor's algorithm~\cite{Shor1997} would undo it on a fault-tolerant quantum computer, but the qubit counts required at cryptographic key sizes remain extremely high~\cite{Jain2016}. This work continues a classical approach to factoring (framed as an optimization problem).
+Multiplying two large primes is easy; recovering them from their product $N = PQ$ is hard. This one-way asymmetry is the foundation of RSA, the most widely deployed public-key cryptosystem~\citep{RSA1978}. Shor's algorithm~\citep{Shor1997} would undo it on a fault-tolerant quantum computer, but the qubit counts required at cryptographic key sizes remain extremely high~\citep{Jain2016}. This work continues a classical approach to factoring (framed as an optimization problem).
 
-Factoring $N = PQ$ can be cast as an optimization problem; an Ising model whose lowest-energy spin configuration encodes the bits of $P$ and $Q$~\cite{Jiang2018,Wang2020}. Recovering the factors then reduces to finding that ground state. This is the task of an Ising machine, a solver built to minimise an Ising energy, realised today in classical~\cite{Aramon2019}, quantum~\cite{Johnson2011}, and quantum-inspired~\cite{Goto2019} hardware. We use simulated annealing~\cite{Kirkpatrick1983,Preis2009} for this task.
+Factoring $N = PQ$ can be cast as an optimization problem; an Ising model whose lowest-energy spin configuration encodes the bits of $P$ and $Q$~\citep{Jiang2018,Wang2020}. Recovering the factors then reduces to finding that ground state. This is the task of an Ising machine, a solver built to minimise an Ising energy, realised today in classical~\citep{Aramon2019}, quantum~\citep{Johnson2011}, and quantum-inspired~\citep{Goto2019} hardware. We use simulated annealing~\citep{Kirkpatrick1983,Preis2009} for this task.
 
 This work mainly focuses on the optimal implementation of the annealer. Simulated annealing repeats the same simple update across every spin, many times over, a workload that maps naturally onto a GPU, where thousands of these updates can run in parallel. We shape the implementation around the structure of the coupling matrix $J_{ij}$ (see Figure~\ref{fig:sparsity}) that encodes the primes, focusing on how the model is laid out in memory to how the work is assigned to the GPU's threads, so that as little of the hardware as possible sits idle. The sections that follow develop each of these choices.
 
@@ -108,10 +117,10 @@ Let $N = PQ$ be a semiprime with $P, Q$ being primes of equal bit length $n = \l
 \end{equation}
 We assume that four bits are known a priori: $p_0 = q_0 = 1$ (as both factors are odd) and $p_{n-1} = q_{n-1} = 1$ (as each prime is exactly $n$ bits).
 
-Multiplying $P$ and $Q$ in their binary representations and matching the result against the known bits of $N$ turns factorization into a constraint satisfaction problem. We adopt the column-based multiplication-table formulation, and the classical bit-reduction rules that accompany it, from Jiang \emph{et al.}~\cite{Jiang2018}, who used the same construction to factor semiprimes on a quantum annealer. Section~\ref{sec:preproc} develops the column equations, the rules that follow them, and the conversion to an Ising model that encodes $P$ and $Q$.
+Multiplying $P$ and $Q$ in their binary representations and matching the result against the known bits of $N$ turns factorization into a constraint satisfaction problem. We adopt the column-based multiplication-table formulation, and the classical bit-reduction rules that accompany it, from Jiang \emph{et al.}~\citeyearpar{Jiang2018}, who used the same construction to factor semiprimes on a quantum annealer. Section~\ref{sec:preproc} develops the column equations, the rules that follow them, and the conversion to an Ising model that encodes $P$ and $Q$.
 
 % =====================================================================
-\section{Classical pre-processing}\label{sec:preproc}
+\section{Problem formulation and reduction}\label{sec:preproc}
 % =====================================================================
 
 \begin{table}[tp]
@@ -123,9 +132,9 @@ $p_1,p_2,p_3,q_1,q_2,q_3$ are unknown). Each cross-term $p_a q_b$ sits
 in the column of place value $2^{a+b}$. A column also receives carries
 from lower columns (carry-in) and emits carries to higher ones
 (carry-out). Balancing the column sum against the known bit of $N$
-gives the clause $C_i = 0$ of Eq.~\eqref{eq:Ci}.}\label{tab:multtable}
+gives the clause $C_i = 0$ of Eq.~\eqref{eq:Ci}}\label{tab:multtable}
 \small
-\setlength{\tabcolsep}{10pt}
+\setlength{\tabcolsep}{8pt}
 \renewcommand{\arraystretch}{1}
 \begin{tabular}{l|ccccccccc}
 \toprule
@@ -169,7 +178,7 @@ The true factors are the unique bit assignment for which every column is balance
 \end{equation}
 whose global minimum $E = 0$ encodes the true factors $P$ and $Q$.
 
-Squaring \eqref{eq:Ci} directly, however, produces a polynomial with a large number of terms. Before handing the problem to the annealer, we try to eliminate as many variables and as much redundancy as possible using deterministic algebraic rules~\cite{Jiang2018}.
+Squaring \eqref{eq:Ci} directly, however, produces a polynomial with a large number of terms. Before handing the problem to the annealer, we try to eliminate as many variables and as much redundancy as possible using deterministic algebraic rules~\citep{Jiang2018}.
 
 \subsection{Reduction rules}\label{sec:rules}
 
@@ -177,7 +186,7 @@ A small set of deterministic rules is enough to drive most carries and several f
 
 \subsection{Quadrization}\label{sec:quad}
 
-The energy term~\eqref{eq:energy} is of degree four in the binary variables. Cubic and quartic terms arise from squaring clauses that contain products like $p_i q_j$. Standard QUBO solvers (and Ising hardware) require degree two, so we apply Rosenberg substitutions~\cite{Rosenberg1975}: introduce an auxiliary $w$ and add a penalty $P(A,B,w) = M(AB - 2Aw - 2Bw + 3w)$ with $M$ large enough that the minimizer would set $w = AB$. After substitution every cubic $AB \cdot s$ becomes a quadratic $w \cdot s$ plus a constant-size quadratic penalty. The implementation of these substitutions for the two sign variants of the cubic case, and the two variants of the quartic case follows the procedure outlined in Jiang \emph{et al.}~\cite{Jiang2018}.
+The energy term~\eqref{eq:energy} is of degree four in the binary variables. Cubic and quartic terms arise from squaring clauses that contain products like $p_i q_j$. Standard QUBO solvers (and Ising hardware) require degree two, so we apply Rosenberg substitutions~\citep{Rosenberg1975}: introduce an auxiliary $w$ and add a penalty $P(A,B,w) = M(AB - 2Aw - 2Bw + 3w)$ with $M$ large enough that the minimizer would set $w = AB$. After substitution every cubic $AB \cdot s$ becomes a quadratic $w \cdot s$ plus a constant-size quadratic penalty. The implementation of these substitutions for the two sign variants of the cubic case, and the two variants of the quartic case follows the procedure outlined in Jiang \emph{et al.}~\citeyearpar{Jiang2018}.
 
 \subsection{From QUBO to Ising}\label{sec:qubotoising}
 
@@ -213,13 +222,13 @@ The Ising form of the factorization problem is what we use throughout.
   $159\,197$ (379), and $338\,699$ (563). Most
   nonzeros concentrate in a small band along the top rows / left
   columns, with a thin diagonal tail. This pattern persists across
-  all orders of magnitude in $N$.}\label{fig:sparsity}
+  all orders of magnitude in $N$}\label{fig:sparsity}
 \end{figure}
 Figure~\ref{fig:sparsity} plots the nonzero structure of $J_{ij}$ for three representative semiprimes. The dense block corresponds to the factor bits $p_i$ and $q_i$, which are coupled to a large fraction of the carry variables $s_{i,j}$ and the quadrization auxiliaries $w$ (Section~\ref{sec:quad}). The thin diagonal trail comes from the carries $s_{i,j}$.
 
-\figimg{fig:hubcount}{Images/scaling of number of spins with N.png}{Number of total Ising spins versus number of densely connected hub spins as the bit width of $N$ grows to $\sim 128$.}
+\figimg{fig:hubcount}{Images/scaling of number of spins with N.png}{Number of total Ising spins versus number of densely connected hub spins as the bit width of $N$ grows to $\sim 128$}
 
-\paragraph{CSR storage.} We store $J$ in Compressed Sparse Row (CSR) format~\cite{Saad2003}: a \texttt{row\_ptr} of $N+1$ row offsets, a \texttt{col\_idx} array of column indices, and a \texttt{values} array of the nonzeros. The use of the CSR notation allows us to use memory in $\bigO(N + \mathrm{nnz})$ rather than $\bigO(N^2)$. Here, $\mathrm{nnz}$ is the number of nonzeros values in the matrix.
+\paragraph{CSR storage.} We store $J$ in Compressed Sparse Row (CSR) format~\citep{Saad2003}: a \texttt{row\_ptr} of $N+1$ row offsets, a \texttt{col\_idx} array of column indices, and a \texttt{values} array of the nonzeros. The use of the CSR notation allows us to use memory in $\bigO(N + \mathrm{nnz})$ rather than $\bigO(N^2)$. Here, $\mathrm{nnz}$ is the number of nonzeros values in the matrix.
 
 % =====================================================================
 \section{Graph-colored simulated annealing on the GPU}\label{sec:sa}
@@ -227,7 +236,7 @@ Figure~\ref{fig:sparsity} plots the nonzero structure of $J_{ij}$ for three repr
 
 The annealer is a Metropolis sampler that tries to flip every spin once per sweep, accepting flips with probability $\min(1, e^{-\beta \dE_i})$. To fully make use of the parallelism of a GPU we need three things: a way to flip many spins in parallel without breaking the energy bookkeeping, kernels whose work pattern matches GPU resources, and a memory layout that keeps the highly accessed data in fast storage.
 
-\subsection{Computing $\Delta E$ from local fields}\label{sec:sa-deltaE}
+\subsection{Computing \texorpdfstring{$\Delta E$}{Delta E} from local fields}\label{sec:sa-deltaE}
 
 Each Metropolis test needs the energy change $\dE_i$ that flipping spin $i$ would cause. The straightforward way to calculate it is to evaluate the total energy of the current state, flip the spin, evaluate the total energy again, and subtract. This however, is not effecient.
 
@@ -238,7 +247,7 @@ Flipping a single spin, changes only the energy terms that involve that spin. Wr
 \end{equation}
 where $L_i$ is the local field acting on spin $i$. The $\dE_i$ calculation therefore collapses to a single sparse dot product over spin $i$'s neighbour row.
 
-\figimg[0.75\columnwidth]{fig:deltaE}{Images/Energy calculation in DA1.png}{Local-field evaluation of $\dE_i$. Each thread group loads spin $i$'s neighbour row from the CSR, multiplies each coupling $J_{ij}$ by the neighbour spin $\sigma_j$, reduces the products to the local field $L_i = \sum_j J_{ij}\sigma_j + h_i$, and returns $\dE_i = -2\sigma_i L_i$. One group per spin lets all $N$ differences be evaluated in a single parallel pass.}
+\figimg[0.75\columnwidth]{fig:deltaE}{Images/Energy calculation in DA1.png}{Local-field evaluation of $\dE_i$. Each thread group loads spin $i$'s neighbour row from the CSR, multiplies each coupling $J_{ij}$ by the neighbour spin $\sigma_j$, reduces the products to the local field $L_i = \sum_j J_{ij}\sigma_j + h_i$, and returns $\dE_i = -2\sigma_i L_i$. One group per spin lets all $N$ differences be evaluated in a single parallel pass}
 
 
 This local-field form is what makes the GPU useful. Since $L_i$ depends only on the current configuration and never on another candidate's flip, the $\dE_i$ of all $N$ spins are mutually independent and can be evaluated in a single parallel pass, with one thread group reducing each spin's neighbour row (Figure~\ref{fig:deltaE}. The thread-to-spin mapping is the subject of Section~\ref{sec:sa-impl}). A full sweep then costs only $\bigO(\mathrm{nnz})$ of total work, spread across the GPU.
@@ -250,7 +259,7 @@ Flipping every accepted spin at once would however, cause errors in the final en
 
 Coloring of the interaction graph (nodes = spins, edges = nonzero $J_{ij}$) produces the mutually-uncoupled sets we look for. It partitions the spins into independent sets (colors) such that no two same-color spins are coupled ($J_{ij} = 0$ for all $i,j$ of the same color). All spins of one color can then be flipped in parallel: each one's $\dE$ depends only on spins of other colors, which are unchanged during this color's pass. Sweeping every color in sequence gives us a full Metropolis sweep.
 
-We compute the coloring once at setup using the Welsh--Powell greedy heuristic~\cite{WelshPowell1967}.
+We compute the coloring once at setup using the Welsh--Powell greedy heuristic~\citep{WelshPowell1967}.
 
 \subsection{Further optimizations in implementation}\label{sec:sa-impl}
 
@@ -303,6 +312,7 @@ Second, the densely connected spins are cached in fast on-chip memory. Since, th
   \Return best-energy spin configuration\;
 \end{algorithm}
 
+\FloatBarrier
 % =====================================================================
 \section{Brute-force post-processing}\label{sec:bruteforce}
 % =====================================================================
@@ -319,7 +329,7 @@ Empirically, this gives us a better starting point as (we see in Figure~\ref{fig
 
 \paragraph{Outward-spiral search.} The search runs on a CPU, spread across all available threads. Candidates around $P_{\mathrm{centre}}$ are grouped into fixed-size chunks of $2^{14}$ consecutive integers. Each chunk is indexed by $k = 0, 1, 2, \dots$, and visited in outward-spiral order so that the candidates closest to $P_{\mathrm{centre}}$ are tested first. Each thread repeatedly claims the next chunk through a shared atomic counter.
 
-\paragraph{Wheel sieve.}~\cite{Pritchard1982} Checking whether a candidate $p$ divides $N$ is an expensive operation, so we want to do it as rarely as possible. The factor we are looking for is a large prime, and a prime is never a multiple of a smaller prime, so any candidate $p$ divisible by $2$, $3$, $5$, $7$, or $11$ can be thrown out at once, with no division by $N$. The integers that survive this filter repeats with period $2 \cdot 3 \cdot 5 \cdot 7 \cdot 11 = 2310$, and only $480$ of every $2310$ ($\approx 21\%$) survive. We precompute those $480$ surviving integers once; each chunk then performs the checks only on the survivors and skips the remaining.
+\paragraph{Wheel sieve.}~\citep{Pritchard1982} Checking whether a candidate $p$ divides $N$ is an expensive operation, so we want to do it as rarely as possible. The factor we are looking for is a large prime, and a prime is never a multiple of a smaller prime, so any candidate $p$ divisible by $2$, $3$, $5$, $7$, or $11$ can be thrown out at once, with no division by $N$. The integers that survive this filter repeats with period $2 \cdot 3 \cdot 5 \cdot 7 \cdot 11 = 2310$, and only $480$ of every $2310$ ($\approx 21\%$) survive. We precompute those $480$ surviving integers once; each chunk then performs the checks only on the survivors and skips the remaining.
 
 \paragraph{Early termination.} The first thread to find $p \mid N$ sets a shared stop flag; all other threads exit at the next chunk boundary. The expected wall-clock cost follows the empirical model
 \begin{equation}
@@ -340,11 +350,11 @@ For each factor bit length $n \in \{8, 10, 12, \dots, 62, 64\}$ (equivalently, $
 
 \subsection{Per-iteration throughput}
 
-\figimg{fig:throughput}{Images/spins_vs_time_per_iteration_for_mac_gh200.png}{SA wall-clock per sweep iteration versus number of Ising spins, comparing the CUDA kernel on GH200, a PyTorch implementation on GH200, and the same PyTorch code on an Apple M2 Max via MPS.}
+\figimg{fig:throughput}{Images/spins_vs_time_per_iteration_for_mac_gh200.png}{SA wall-clock per sweep iteration versus number of Ising spins, comparing the CUDA kernel on GH200, a PyTorch implementation on GH200, and the same PyTorch code on an Apple M2 Max via MPS}
 
 Figure~\ref{fig:throughput} compares wall-clock per sweep across the three implementations. The CUDA kernel stays near $0.05$\,ms per iteration across the spin count; the PyTorch implementation of graph colored simulated annealing, pays roughly $5\times$ that on the same GPU because its primitives do not exploit the structure of the problem as we do in Section \ref{sec:sa-impl}.
 
-\figimg{fig:scaling}{Images/Construction and Annealing Time.png}{Time to build $J$ and time to run one full annealing schedule, both as a function of $n$ in $[16, 128]$ bits.}
+\figimg{fig:scaling}{Images/Construction and Annealing Time.png}{Time to build $J$ and time to run one full annealing schedule, both as a function of $n$ in $[16, 128]$ bits}
 
 
 \subsection{Solution quality}
@@ -356,17 +366,17 @@ Figure~\ref{fig:quality} reports the relative gap between the predicted and the 
 \item The averaged centroid $\tfrac{1}{2}(P_{\mathrm{pred}} + \lfloor N / Q_{\mathrm{pred}} \rfloor)$. Mean gap $2.98\%$.
 \end{enumerate}
 
-\figimg{fig:quality}{Images/Percentage Gap between real and estimated P.png}{Percentage gap between predicted and true $P$ as a function of $n$, for three estimators: $\sqrt{N}$ (baseline), $P_{\mathrm{pred}}$ from SA, and the averaged centroid $\tfrac{1}{2}(P_{\mathrm{pred}} + N / Q_{\mathrm{pred}})$.}
+\figimg{fig:quality}{Images/Percentage Gap between real and estimated P.png}{Percentage gap between predicted and true $P$ as a function of $n$, for three estimators: $\sqrt{N}$ (baseline), $P_{\mathrm{pred}}$ from SA, and the averaged centroid $\tfrac{1}{2}(P_{\mathrm{pred}} + N / Q_{\mathrm{pred}})$}
 
 \subsection{Brute-force time as a function of gap}
 
-\figimg{fig:bruteforce}{Images/Raw gap vs Time taken to find solution.png}{Time taken to find the exact factor by the wheel-sieve brute-force search, as a function of the raw gap between $P_{\mathrm{centre}}$ and the true $P$, on the $72$-thread GH200 Grace CPU.}
+\figimg{fig:bruteforce}{Images/Raw gap vs Time taken to find solution.png}{Time taken to find the exact factor by the wheel-sieve brute-force search, as a function of the raw gap between $P_{\mathrm{centre}}$ and the true $P$, on the $72$-thread GH200 Grace CPU}
 
 Figure~\ref{fig:bruteforce} shows two regimes, both a consequence of the chunk-per-thread parallelism of Section~\ref{sec:bruteforce}. The search hands out fixed-size chunks to the $72$ threads of the GH200 Grace CPU. When the gap is small, the entire search space is only a handful of chunks: every thread takes at most one, and a single parallel pass already brackets the true factor. The time is then just the fixed cost of that one pass, independent of the exact gap (the flat region below a gap of $\sim 10^5$). Once the gap grows past what $72$ threads can cover at once, the threads run out and must work through the surplus chunks in successive rounds; the search effectively becomes serial, and the time grows linearly with the gap, matching the $\mathrm{Gap} \cdot 2^n$ term of Eq.~\eqref{eq:bf-time}.
 
 \subsection{Search with Coppersmith}\label{sec:coppersmith}
 
-The post-processing step is where solution quality matters most. Trial-division brute force around $P_{\mathrm{centre}}$ scales as $\mathrm{Gap}\cdot 2^n$ (Eq.~\eqref{eq:bf-time}); for a $128$-bit semiprime with the annealer's typical $\sim 2\%$ gap, this already projects to roughly $6$ months of CPU work on the $72$-thread GH200 host. Coppersmith's method~\cite{Coppersmith1997} gives us better scaling: built around lattice (LLL) reduction, it recovers a factor in polynomial time whenever an approximation of the factor $P$ lies within $N^{1/4}$ of the true value. Applying Coppersmith over an outward-spiralling grid of overlapping lattice windows (each of half-width $\sim N^{1/4}$) around the annealer's $P_{\mathrm{centre}}$ pulls the same $128$-bit instance down to approximately $21$\,hours on the same hardware, a $\sim 200\times$ improvement on the brute-force projection.
+The post-processing step is where solution quality matters most. Trial-division brute force around $P_{\mathrm{centre}}$ scales as $\mathrm{Gap}\cdot 2^n$ (Eq.~\eqref{eq:bf-time}); for a $128$-bit semiprime with the annealer's typical $\sim 2\%$ gap, this already projects to roughly $6$ months of CPU work on the $72$-thread GH200 host. Coppersmith's method~\citep{Coppersmith1997} gives us better scaling: built around lattice (LLL) reduction, it recovers a factor in polynomial time whenever an approximation of the factor $P$ lies within $N^{1/4}$ of the true value. Applying Coppersmith over an outward-spiralling grid of overlapping lattice windows (each of half-width $\sim N^{1/4}$) around the annealer's $P_{\mathrm{centre}}$ pulls the same $128$-bit instance down to approximately $21$\,hours on the same hardware, a $\sim 200\times$ improvement on the brute-force projection.
 
 \subsection{100-bit end-to-end wall-clock time}
 
@@ -403,13 +413,33 @@ We show that the optimization-based, annealing-driven route to factoring is a re
 
 The natural target to focus on is the annealer quality, being reliably able to land $P_{\mathrm{pred}}$ within $N^{1/4}$ of the true factor. At that point, the spiralling grid of Coppersmith windows (Section~\ref{sec:coppersmith}) collapses to a single lattice reduction that recovers $P$ in polynomial time, putting the pipeline as a whole within reach of polynomial-time prime factorization.
 
-% =====================================================================
-\section*{Data Availability}
-% =====================================================================
-
-The full implementation of the pipeline described in this paper: the QUBO construction, the GPU graph-colored simulated annealer, the brute-force post-processing, and the Coppersmith-based post-processing, together with the benchmark scripts used to generate the reported results, is available at \url{https://github.com/AdvithDesu/Digital_Annealer}. For every factor bit length $n$ reported, the test instances are generated by sampling two independent primes $P$ and $Q$ uniformly at random from $[2^{n},\, 2^{n + 1})$ via \texttt{sympy.randprime}, so that each factor is exactly $n$ bits, and setting $N = PQ$ (a $2n$-bit semiprime).
-
 \backmatter
+
+% =====================================================================
+% Declarations (Springer-required block).
+% NOTE: Funding / Competing interests / Ethics / Consent / Materials /
+% Author contributions are placeholders pending input — to be filled in
+% Tier 1 step 2 of the submission plan.
+% =====================================================================
+\section*{Statements and Declarations}
+
+\begin{itemize}
+\item \textbf{Funding.} This work was supported by the Mphasis F1 Foundation. The research was carried out at the Centre for Quantum Information, Communication and Computing (CQuICC), Indian Institute of Technology Madras.
+
+\item \textbf{Competing interests.} \emph{Financial interests:} The authors declare they have no financial interests. \emph{Non-financial interests:} none.
+
+\item \textbf{Ethics approval and consent to participate.} Not applicable.
+
+\item \textbf{Consent for publication.} Not applicable.
+
+\item \textbf{Data availability.} For every factor bit length $n$ reported, the test instances are generated by sampling two independent primes $P$ and $Q$ uniformly at random from $[2^{n},\, 2^{n + 1})$ via \texttt{sympy.randprime}, so that each factor is exactly $n$ bits, and setting $N = PQ$ (a $2n$-bit semiprime). All raw benchmark outputs and CSR problem instances used to produce the figures in this paper are from the scripts in the source repository (see Code availability).
+
+\item \textbf{Materials availability.} Not applicable.
+
+\item \textbf{Code availability.} The full implementation of the pipeline described in this paper, from the QUBO construction, the GPU graph-colored simulated annealer, the brute-force post-processing, and the Coppersmith-based post-processing, together with the benchmark scripts used to generate the reported results, is available at \url{https://github.com/AdvithDesu/Digital_Annealer}.
+
+\item \textbf{Author contributions.} Conceptualization: Advith Desu, Aryan Namboodiri, Anil Prabhakar; Methodology: Advith Desu, Aryan Namboodiri; Software: Advith Desu; Investigation: Advith Desu; Writing original draft: Advith Desu; Review and editing: Advith Desu, Aryan Namboodiri, Anil Prabhakar; Supervision: Anil Prabhakar.
+\end{itemize}
 
 % =====================================================================
 \begin{appendices}
@@ -479,7 +509,7 @@ The inner neighbor-sum loop is therefore a sign test on \texttt{col\_idx[k]}, a 
 
 A simulated-annealing run is parameterized by a temperature schedule $T_t = T_0 \alpha^t$ with $0 < \alpha < 1$ and an inner sweep count. The wrong $T_0$ wastes sweeps: too high and the run is effectively a random walk for many iterations; too low and the system freezes into the initial basin.
 
-We estimate $T_0$ adaptively, as done in~\cite{BenAmeur2004}. Across $K = 10$ random spin configurations we sample every spin's uphill $\dE$ (the energy cost of a single flip when it raises the energy), average them, and set
+We estimate $T_0$ adaptively, as done in~\citep{BenAmeur2004}. Across $K = 10$ random spin configurations we sample every spin's uphill $\dE$ (the energy cost of a single flip when it raises the energy), average them, and set
 \begin{equation}
   T_0 \;=\; \langle \dE^{+} \rangle \, / \, \ln(1 / \chi),
 \end{equation}
