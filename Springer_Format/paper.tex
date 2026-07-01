@@ -215,9 +215,9 @@ The Ising form of the factorization problem is what we use throughout.
 \paragraph{The coupling matrix is sparse, and stays sparse.}
 \begin{figure}[tp]
   \centering
-  \includegraphics[width=0.32\textwidth]{Images/Sparsity of J matrix for 162 BQM.png}\hfill
-  \includegraphics[width=0.32\textwidth]{Images/Sparsity of J matrix for 379 BQM.png}\hfill
-  \includegraphics[width=0.32\textwidth]{Images/Sparsity of J matrix for 563 BQM.png}
+  \includegraphics[width=0.32\textwidth]{Images/Fig1a.png}\hfill
+  \includegraphics[width=0.32\textwidth]{Images/Fig1b.png}\hfill
+  \includegraphics[width=0.32\textwidth]{Images/Fig1c.png}
   \caption{Sparsity of $J_{ij}$ at $N=39\,203$ (162 spins),
   $159\,197$ (379), and $338\,699$ (563). Most
   nonzeros concentrate in a small band along the top rows / left
@@ -226,7 +226,7 @@ The Ising form of the factorization problem is what we use throughout.
 \end{figure}
 Figure~\ref{fig:sparsity} plots the nonzero structure of $J_{ij}$ for three representative semiprimes. The dense block corresponds to the factor bits $p_i$ and $q_i$, which are coupled to a large fraction of the carry variables $s_{i,j}$ and the quadrization auxiliaries $w$ (Section~\ref{sec:quad}). The thin diagonal trail comes from the carries $s_{i,j}$.
 
-\figimg{fig:hubcount}{Images/scaling of number of spins with N.png}{Number of total Ising spins versus number of densely connected hub spins as the bit width of $N$ grows to $\sim 128$}
+\figimg{fig:hubcount}{Images/Fig2.png}{Number of total Ising spins versus number of densely connected hub spins as the bit width of $N$ grows to $\sim 128$}
 
 \paragraph{CSR storage.} We store $J$ in Compressed Sparse Row (CSR) format~\citep{Saad2003}: a \texttt{row\_ptr} of $N+1$ row offsets, a \texttt{col\_idx} array of column indices, and a \texttt{values} array of the nonzeros. The use of the CSR notation allows us to use memory in $\bigO(N + \mathrm{nnz})$ rather than $\bigO(N^2)$. Here, $\mathrm{nnz}$ is the number of nonzeros values in the matrix.
 
@@ -247,7 +247,7 @@ Flipping a single spin, changes only the energy terms that involve that spin. Wr
 \end{equation}
 where $L_i$ is the local field acting on spin $i$. The $\dE_i$ calculation therefore collapses to a single sparse dot product over spin $i$'s neighbour row.
 
-\figimg[0.75\columnwidth]{fig:deltaE}{Images/Energy calculation in DA1.png}{Local-field evaluation of $\dE_i$. Each thread group loads spin $i$'s neighbour row from the CSR, multiplies each coupling $J_{ij}$ by the neighbour spin $\sigma_j$, reduces the products to the local field $L_i = \sum_j J_{ij}\sigma_j + h_i$, and returns $\dE_i = -2\sigma_i L_i$. One group per spin lets all $N$ differences be evaluated in a single parallel pass}
+\figimg[0.75\columnwidth]{fig:deltaE}{Images/Fig3.png}{Local-field evaluation of $\dE_i$. Each thread group loads spin $i$'s neighbour row from the CSR, multiplies each coupling $J_{ij}$ by the neighbour spin $\sigma_j$, reduces the products to the local field $L_i = \sum_j J_{ij}\sigma_j + h_i$, and returns $\dE_i = -2\sigma_i L_i$. One group per spin lets all $N$ differences be evaluated in a single parallel pass}
 
 
 This local-field form is what makes the GPU useful. Since $L_i$ depends only on the current configuration and never on another candidate's flip, the $\dE_i$ of all $N$ spins are mutually independent and can be evaluated in a single parallel pass, with one thread group reducing each spin's neighbour row (Figure~\ref{fig:deltaE}. The thread-to-spin mapping is the subject of Section~\ref{sec:sa-impl}). A full sweep then costs only $\bigO(\mathrm{nnz})$ of total work, spread across the GPU.
@@ -350,11 +350,11 @@ For each factor bit length $n \in \{8, 10, 12, \dots, 62, 64\}$ (equivalently, $
 
 \subsection{Per-iteration throughput}
 
-\figimg{fig:throughput}{Images/spins_vs_time_per_iteration_for_mac_gh200.png}{SA wall-clock per sweep iteration versus number of Ising spins, comparing the CUDA kernel on GH200, a PyTorch implementation on GH200, and the same PyTorch code on an Apple M2 Max via MPS}
+\figimg{fig:throughput}{Images/Fig4.png}{SA wall-clock per sweep iteration versus number of Ising spins, comparing the CUDA kernel on GH200, a PyTorch implementation on GH200, and the same PyTorch code on an Apple M2 Max via MPS}
 
 Figure~\ref{fig:throughput} compares wall-clock per sweep across the three implementations. The CUDA kernel stays near $0.05$\,ms per iteration across the spin count; the PyTorch implementation of graph colored simulated annealing, pays roughly $5\times$ that on the same GPU because its primitives do not exploit the structure of the problem as we do in Section \ref{sec:sa-impl}.
 
-\figimg{fig:scaling}{Images/Construction and Annealing Time.png}{Time to build $J$ and time to run one full annealing schedule, both as a function of $n$ in $[16, 128]$ bits}
+\figimg{fig:scaling}{Images/Fig5.png}{Time to build $J$ and time to run one full annealing schedule, both as a function of $n$ in $[16, 128]$ bits}
 
 
 \subsection{Solution quality}
@@ -366,11 +366,11 @@ Figure~\ref{fig:quality} reports the relative gap between the predicted and the 
 \item The averaged centroid $\tfrac{1}{2}(P_{\mathrm{pred}} + \lfloor N / Q_{\mathrm{pred}} \rfloor)$. Mean gap $2.98\%$.
 \end{enumerate}
 
-\figimg{fig:quality}{Images/Percentage Gap between real and estimated P.png}{Percentage gap between predicted and true $P$ as a function of $n$, for three estimators: $\sqrt{N}$ (baseline), $P_{\mathrm{pred}}$ from SA, and the averaged centroid $\tfrac{1}{2}(P_{\mathrm{pred}} + N / Q_{\mathrm{pred}})$}
+\figimg{fig:quality}{Images/Fig6.png}{Percentage gap between predicted and true $P$ as a function of $n$, for three estimators: $\sqrt{N}$ (baseline), $P_{\mathrm{pred}}$ from SA, and the averaged centroid $\tfrac{1}{2}(P_{\mathrm{pred}} + N / Q_{\mathrm{pred}})$}
 
 \subsection{Brute-force time as a function of gap}
 
-\figimg{fig:bruteforce}{Images/Raw gap vs Time taken to find solution.png}{Time taken to find the exact factor by the wheel-sieve brute-force search, as a function of the raw gap between $P_{\mathrm{centre}}$ and the true $P$, on the $72$-thread GH200 Grace CPU}
+\figimg{fig:bruteforce}{Images/Fig7.png}{Time taken to find the exact factor by the wheel-sieve brute-force search, as a function of the raw gap between $P_{\mathrm{centre}}$ and the true $P$, on the $72$-thread GH200 Grace CPU}
 
 Figure~\ref{fig:bruteforce} shows two regimes, both a consequence of the chunk-per-thread parallelism of Section~\ref{sec:bruteforce}. The search hands out fixed-size chunks to the $72$ threads of the GH200 Grace CPU. When the gap is small, the entire search space is only a handful of chunks: every thread takes at most one, and a single parallel pass already brackets the true factor. The time is then just the fixed cost of that one pass, independent of the exact gap (the flat region below a gap of $\sim 10^5$). Once the gap grows past what $72$ threads can cover at once, the threads run out and must work through the surplus chunks in successive rounds; the search effectively becomes serial, and the time grows linearly with the gap, matching the $\mathrm{Gap} \cdot 2^n$ term of Eq.~\eqref{eq:bf-time}.
 
@@ -487,18 +487,18 @@ This appendix expands the two implementation choices summarized in Section~\ref{
 
 \subsection{Dense and sparse spin bins}\label{sec:sa-bins}
 
-The two empirical features from Section~\ref{sec:scaling} --- a small dense hub set and a long sparse tail --- map naturally onto two GPU kernels.
+The two empirical features from Section~\ref{sec:scaling}, a small dense hub set and a long sparse tail, map naturally onto two types of GPU thread groups.
 \begin{description}
 \item[Dense bin] (row degree $\geq 128$). One CUDA block of $1024$ threads handles one spin. Each thread accumulates a partial sum over a stride of the spin's neighbor row; a shared-memory tree reduction collapses the partials to $\dE$. The block size matches the dense-row length so threads stay busy.
-\item[Sparse bin] (row degree $< 128$). One warp ($32$ threads) handles one spin; $32$ spins are packed into a $1024$-thread block. Each warp does a warp-shuffle reduction --- no shared memory, no explicit synchronization within the warp. This gives much higher occupancy than the dense layout would for short rows.
+\item[Sparse bin] (row degree $< 128$). One warp ($32$ threads) handles one spin; $32$ spins are packed into a $1024$-thread block. Each warp does a warp-shuffle reduction, there is no shared memory and no explicit synchronization within the warp. This gives much higher occupancy than the dense layout would for short rows.
 \end{description}
-The threshold $128$ matches the warp's natural reduction tier and is robust across the bit-width range we tested: above it, dense reduction amortizes the block-launch overhead; below it, the warp layout wins on occupancy.
+The threshold $128$ matches the warp's natural reduction tier and is robust across the bit-width range we tested: above it, dense reduction amortizes the block-launch overhead; below it, the warp layout does better on occupancy.
 
 \subsection{Hub-tagged sparse CSR}\label{sec:sa-hubs}
 
 The dense (hub) spins are read by essentially every sparse spin in every color pass when calculating their $\dE$. Reading them from global memory each time is expensive, so we cache them once per color pass.
 
-Hub values for the entire problem are copied into a shared-memory array (at most $256$ bytes total) at the start of each sparse kernel launch. To resolve ``is this neighbor a hub or not?" branchlessly, we tag the column-index array of the sparse-only CSR: the high bit of \texttt{col\_idx[k]} encodes the answer.
+Hub values for the entire problem are copied into a shared-memory array (at most $256$ bytes total) at the start of each sparse kernel launch. To resolve ``is this neighbor a hub or not?" branchlessly, we tag the column-index array of the sparse-only CSR, where the high bit of \texttt{col\_idx[k]} encodes the answer.
 \begin{itemize}
 \item High bit set: the low 31 bits are an index into the hub cache in shared memory.
 \item High bit clear: the entry is a raw global spin id, used as a fallback for the rare non-hub neighbor.
@@ -507,7 +507,7 @@ The inner neighbor-sum loop is therefore a sign test on \texttt{col\_idx[k]}, a 
 
 \subsection{Auto start temperature and cooling}\label{sec:sa-temp}
 
-A simulated-annealing run is parameterized by a temperature schedule $T_t = T_0 \alpha^t$ with $0 < \alpha < 1$ and an inner sweep count. The wrong $T_0$ wastes sweeps: too high and the run is effectively a random walk for many iterations; too low and the system freezes into the initial basin.
+A simulated-annealing run is parameterized by a temperature schedule $T_t = T_0 \alpha^t$ with $0 < \alpha < 1$ and an inner sweep count. The wrong $T_0$ wastes sweeps: too high and the run is effectively a random walk for many iterations; too low and the system freezes into local minimas.
 
 We estimate $T_0$ adaptively, as done in~\citep{BenAmeur2004}. Across $K = 10$ random spin configurations we sample every spin's uphill $\dE$ (the energy cost of a single flip when it raises the energy), average them, and set
 \begin{equation}
@@ -518,7 +518,7 @@ where $\chi = 0.5$ is the target acceptance rate at the start of the schedule. T
 \subsection{Numerical correctness}\label{sec:sa-scaffolding}
 
 \begin{description}
-\item[Symmetry check.] On load, the annealer samples random rows of the CSR and verifies that for every stored $(i, j, J_{ij})$ the partner $(j, i, J_{ji})$ is also stored and has the same value. The energy and $\dE$ formulas assume this; an upper-triangular-only CSR would silently halve every off-diagonal coupling.
+\item[Symmetry check.] On load, the annealer samples random rows of the CSR and verifies that for every stored $(i, j, J_{ij})$ the partner $(j, i, J_{ji})$ is also stored and has the same value. The energy and $\dE$ formulas assume this.
 \item[Running-energy accumulator.] Instead of recomputing the total energy from scratch after each sweep, the annealer keeps a running sum: every accepted flip atomically adds its $\dE$ to a \texttt{double} accumulator. At the end of each annealing run, the accumulator is checked against a fresh full-state recomputation; relative drift stays below $10^{-9}$ for all problem sizes we tested.
 \end{description}
 
