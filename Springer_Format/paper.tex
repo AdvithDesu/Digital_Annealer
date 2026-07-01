@@ -100,7 +100,7 @@
 
 Multiplying two large primes is easy; recovering them from their product $N = PQ$ is hard. This one-way asymmetry is the foundation of RSA, the most widely deployed public-key cryptosystem~\citep{RSA1978}. Shor's algorithm~\citep{Shor1997} would undo it on a fault-tolerant quantum computer, but the qubit counts required at cryptographic key sizes remain extremely high~\citep{Jain2016}. This work continues a classical approach to factoring (framed as an optimization problem).
 
-Factoring $N = PQ$ can be cast as an optimization problem; an Ising model whose lowest-energy spin configuration encodes the bits of $P$ and $Q$~\citep{Jiang2018,Wang2020}. Recovering the factors then reduces to finding that ground state. This is the task of an Ising machine, a solver built to minimise an Ising energy, realised today in classical~\citep{Aramon2019}, quantum~\citep{Johnson2011}, and quantum-inspired~\citep{Goto2019} hardware. We use simulated annealing~\citep{Kirkpatrick1983,Preis2009} for this task.
+Factoring $N = PQ$ can be cast as an optimization problem; an Ising model whose lowest-energy spin configuration encodes the bits of $P$ and $Q$~\citep{Jiang2018,Wang2020}. Recovering the factors then reduces to finding that ground state. This is the task of an Ising machine, a solver built to minimise an Ising energy, realised today in classical~\citep{Aramon2019}, quantum~\citep{Johnson2011}, and quantum-inspired~\citep{Goto2019} hardware. We use simulated annealing (SA)~\citep{Kirkpatrick1983,Preis2009} for this task.
 
 This work mainly focuses on the optimal implementation of the annealer. Simulated annealing repeats the same simple update across every spin, many times over, a workload that maps naturally onto a GPU, where thousands of these updates can run in parallel. We shape the implementation around the structure of the coupling matrix $J_{ij}$ (see Figure~\ref{fig:sparsity}) that encodes the primes, focusing on how the model is laid out in memory to how the work is assigned to the GPU's threads, so that as little of the hardware as possible sits idle. The sections that follow develop each of these choices.
 
@@ -186,7 +186,7 @@ A small set of deterministic rules is enough to drive most carries and several f
 
 \subsection{Quadrization}\label{sec:quad}
 
-The energy term~\eqref{eq:energy} is of degree four in the binary variables. Cubic and quartic terms arise from squaring clauses that contain products like $p_i q_j$. Standard QUBO solvers (and Ising hardware) require degree two, so we apply Rosenberg substitutions~\citep{Rosenberg1975}: introduce an auxiliary $w$ and add a penalty $P(A,B,w) = M(AB - 2Aw - 2Bw + 3w)$ with $M$ large enough that the minimizer would set $w = AB$. After substitution every cubic $AB \cdot s$ becomes a quadratic $w \cdot s$ plus a constant-size quadratic penalty. The implementation of these substitutions for the two sign variants of the cubic case, and the two variants of the quartic case follows the procedure outlined in Jiang \emph{et al.}~\citeyearpar{Jiang2018}.
+The energy term~\eqref{eq:energy} is of degree four in the binary variables. Cubic and quartic terms arise from squaring clauses that contain products like $p_i q_j$. Standard quadratic unconstrained binary optimization (QUBO) solvers (and Ising hardware) require degree two, so we apply Rosenberg substitutions~\citep{Rosenberg1975}: introduce an auxiliary $w$ and add a penalty $P(A,B,w) = M(AB - 2Aw - 2Bw + 3w)$ with $M$ large enough that the minimizer would set $w = AB$. After substitution every cubic $AB \cdot s$ becomes a quadratic $w \cdot s$ plus a constant-size quadratic penalty. The implementation of these substitutions for the two sign variants of the cubic case, and the two variants of the quartic case follows the procedure outlined in Jiang \emph{et al.}~\citeyearpar{Jiang2018}.
 
 \subsection{From QUBO to Ising}\label{sec:qubotoising}
 
@@ -350,7 +350,7 @@ For each factor bit length $n \in \{8, 10, 12, \dots, 62, 64\}$ (equivalently, $
 
 \subsection{Per-iteration throughput}
 
-\figimg{fig:throughput}{Images/Fig4.png}{SA wall-clock per sweep iteration versus number of Ising spins, comparing the CUDA kernel on GH200, a PyTorch implementation on GH200, and the same PyTorch code on an Apple M2 Max via MPS}
+\figimg{fig:throughput}{Images/Fig4.png}{SA wall-clock per sweep iteration versus number of Ising spins, comparing the CUDA kernel on GH200, a PyTorch implementation on GH200, and the same PyTorch code on an Apple M2 Max via Metal Performance Shaders (MPS)}
 
 Figure~\ref{fig:throughput} compares wall-clock per sweep across the three implementations. The CUDA kernel stays near $0.05$\,ms per iteration across the spin count; the PyTorch implementation of graph colored simulated annealing, pays roughly $5\times$ that on the same GPU because its primitives do not exploit the structure of the problem as we do in Section \ref{sec:sa-impl}.
 
@@ -376,7 +376,7 @@ Figure~\ref{fig:bruteforce} shows two regimes, both a consequence of the chunk-p
 
 \subsection{Search with Coppersmith}\label{sec:coppersmith}
 
-The post-processing step is where solution quality matters most. Trial-division brute force around $P_{\mathrm{centre}}$ scales as $\mathrm{Gap}\cdot 2^n$ (Eq.~\eqref{eq:bf-time}); for a $128$-bit semiprime with the annealer's typical $\sim 2\%$ gap, this already projects to roughly $6$ months of CPU work on the $72$-thread GH200 host. Coppersmith's method~\citep{Coppersmith1997} gives us better scaling: built around lattice (LLL) reduction, it recovers a factor in polynomial time whenever an approximation of the factor $P$ lies within $N^{1/4}$ of the true value. Applying Coppersmith over an outward-spiralling grid of overlapping lattice windows (each of half-width $\sim N^{1/4}$) around the annealer's $P_{\mathrm{centre}}$ pulls the same $128$-bit instance down to approximately $21$\,hours on the same hardware, a $\sim 200\times$ improvement on the brute-force projection.
+The post-processing step is where solution quality matters most. Trial-division brute force around $P_{\mathrm{centre}}$ scales as $\mathrm{Gap}\cdot 2^n$ (Eq.~\eqref{eq:bf-time}); for a $128$-bit semiprime with the annealer's typical $\sim 2\%$ gap, this already projects to roughly $6$ months of CPU work on the $72$-thread GH200 host. Coppersmith's method~\citep{Coppersmith1997} gives us better scaling: built around Lenstra--Lenstra--Lov\'asz (LLL) lattice reduction, it recovers a factor in polynomial time whenever an approximation of the factor $P$ lies within $N^{1/4}$ of the true value. Applying Coppersmith over an outward-spiralling grid of overlapping lattice windows (each of half-width $\sim N^{1/4}$) around the annealer's $P_{\mathrm{centre}}$ pulls the same $128$-bit instance down to approximately $21$\,hours on the same hardware, a $\sim 200\times$ improvement on the brute-force projection.
 
 \subsection{100-bit end-to-end wall-clock time}
 
